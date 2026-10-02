@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  postgres-wellbeing:
+    image: postgres:15-alpine
+    container_name: zeal-postgres-wellbeing
+    restart: always
+    environment:
+      POSTGRES_DB: zeal_wellbeing_db
+      POSTGRES_USER: zeal_user
+      POSTGRES_PASSWORD: zeal_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_wellbeing_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zeal_user -d zeal_wellbeing_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-marketplace:
+    image: postgres:15-alpine
+    container_name: zeal-postgres-marketplace
+    restart: always
+    environment:
+      POSTGRES_DB: zeal_marketplace_db
+      POSTGRES_USER: zeal_user
+      POSTGRES_PASSWORD: zeal_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_marketplace_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zeal_user -d zeal_marketplace_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis-broker:
+    image: redis:7-alpine
+    container_name: zeal-redis-broker
+    restart: always
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_wellbeing_data:
+  postgres_marketplace_data:
