@@ -33,10 +33,10 @@ public class ReservationEventPublisher {
 			redisTemplate.convertAndSend(CHANNEL, objectMapper.writeValueAsString(event));
 		}
 		catch (JacksonException exception) {
-			logger.error("Could not serialize occupied-slot event for reservation {}", event.reservationId(), exception);
+			logger.error("Could not serialize availability event for reservation {}", event.reservationId(), exception);
 		}
 		catch (RuntimeException exception) {
-			logger.error("Could not publish occupied-slot event for reservation {}", event.reservationId(), exception);
+			logger.error("Could not publish availability event for reservation {}", event.reservationId(), exception);
 		}
 	}
 }

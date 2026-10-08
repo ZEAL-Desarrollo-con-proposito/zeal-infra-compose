@@ -32,7 +32,7 @@ public class RedisAvailabilityMessageListener implements MessageListener {
 			messagingTemplate.convertAndSend("/topic/availability", event);
 		}
 		catch (JacksonException exception) {
-			logger.error("Could not process Redis occupied-slot event", exception);
+			logger.error("Could not process availability event", exception);
 		}
 	}
 }

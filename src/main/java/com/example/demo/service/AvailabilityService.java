@@ -23,6 +23,7 @@ import com.example.demo.api.AvailabilityDirectoryResponse.FreeSlotResponse;
 import com.example.demo.domain.AvailabilityRule;
 import com.example.demo.domain.Psychologist;
 import com.example.demo.domain.Reservation;
+import com.example.demo.domain.ReservationStatus;
 import com.example.demo.repository.AvailabilityRuleRepository;
 import com.example.demo.repository.PsychologistRepository;
 import com.example.demo.repository.ReservationRepository;
@@ -59,9 +60,9 @@ public class AvailabilityService {
 		Map<UUID, List<AvailabilityRule>> rulesByPsychologist = rules.stream()
 				.collect(Collectors.groupingBy(rule -> rule.getPsychologist().getId()));
 		List<Reservation> reservations = reservationRepository
-				.findAllByPsychologistIdInAndStartsAtGreaterThanEqualAndStartsAtLessThan(
+				.findAllByPsychologistIdInAndStartsAtGreaterThanEqualAndStartsAtLessThanAndStatus(
 						psychologistIds, from.minusDays(1).atStartOfDay(ZoneId.of("UTC")).toInstant(),
-						to.plusDays(2).atStartOfDay(ZoneId.of("UTC")).toInstant());
+						to.plusDays(2).atStartOfDay(ZoneId.of("UTC")).toInstant(), ReservationStatus.ACTIVE);
 		Set<String> reservedOccurrences = reservations.stream()
 				.map(reservation -> key(reservation.getPsychologist().getId(), reservation.getStartsAt()))
 				.collect(Collectors.toCollection(HashSet::new));

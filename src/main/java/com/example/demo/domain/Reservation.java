@@ -5,6 +5,8 @@ import java.util.UUID;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -12,12 +14,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 
 @Entity
-@Table(name = "reservations", uniqueConstraints = @UniqueConstraint(
-		name = "uk_reservation_psychologist_start",
-		columnNames = { "psychologist_id", "starts_at" }))
+@Table(name = "reservations")
 public class Reservation {
 
 	@Id
@@ -36,6 +35,10 @@ public class Reservation {
 
 	@Column(name = "ends_at", nullable = false)
 	private Instant endsAt;
+
+	@Enumerated(EnumType.STRING)
+	@Column(nullable = false, length = 20)
+	private ReservationStatus status = ReservationStatus.ACTIVE;
 
 	protected Reservation() {
 	}
@@ -65,5 +68,16 @@ public class Reservation {
 
 	public Instant getEndsAt() {
 		return endsAt;
+	}
+
+	public ReservationStatus getStatus() {
+		return status;
+	}
+
+	public void cancel() {
+		if (status != ReservationStatus.ACTIVE) {
+			throw new IllegalStateException("Only active reservations can be cancelled");
+		}
+		status = ReservationStatus.CANCELLED;
 	}
 }
