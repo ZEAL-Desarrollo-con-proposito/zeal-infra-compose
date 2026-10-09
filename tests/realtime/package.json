@@ -1,0 +1,12 @@
+{
+  "name": "zeal-realtime-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node realtime-e2e.mjs"
+  },
+  "dependencies": {
+    "@stomp/stompjs": "^7.1.1",
+    "sockjs-client": "^1.6.1"
+  }
+}
