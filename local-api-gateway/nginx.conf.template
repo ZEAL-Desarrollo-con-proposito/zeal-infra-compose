@@ -1,0 +1,34 @@
+map $http_origin $cors_origin {
+    default "";
+    "~^https?://(localhost|127\.0\.0\.1):3000$" $http_origin;
+}
+
+server {
+    listen 8080;
+
+    add_header Access-Control-Allow-Origin $cors_origin always;
+    add_header Access-Control-Allow-Credentials "true" always;
+    add_header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS" always;
+    add_header Access-Control-Allow-Headers "Authorization, Content-Type, Accept, Origin" always;
+    add_header Vary "Origin" always;
+
+    if ($request_method = OPTIONS) {
+        return 204;
+    }
+
+    location = /api/chats {
+        proxy_pass ${LOCAL_MARKETPLACE_UPSTREAM};
+    }
+
+    location ^~ /api/chats/ {
+        proxy_pass ${LOCAL_MARKETPLACE_UPSTREAM};
+    }
+
+    location ^~ /api/marketplace/ {
+        proxy_pass ${LOCAL_MARKETPLACE_UPSTREAM};
+    }
+
+    location /api/ {
+        proxy_pass ${LOCAL_WELLBEING_UPSTREAM};
+    }
+}

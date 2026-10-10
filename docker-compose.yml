@@ -44,6 +44,21 @@ services:
     ports:
       - "6379:6379"
 
+  local-api-gateway:
+    image: nginx:stable-alpine
+    profiles:
+      - local-api
+    ports:
+      - "8080:8080"
+    environment:
+      LOCAL_MARKETPLACE_UPSTREAM: ${LOCAL_MARKETPLACE_UPSTREAM:-http://host.docker.internal:8082}
+      LOCAL_WELLBEING_UPSTREAM: ${LOCAL_WELLBEING_UPSTREAM:-http://host.docker.internal:8081}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./local-api-gateway/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    restart: unless-stopped
+
 volumes:
   postgres_wellbeing_data:
   postgres_marketplace_data:
