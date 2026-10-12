@@ -51,3 +51,65 @@ Cada ejecución crea su propia convocatoria/franjas, así que se pueden repetir.
 Los servicios usan esquemas propios (`wellbeing`, `marketplace`) gestionados con Flyway. Las tablas
 del esquema `public` de versiones anteriores ya no se usan; si quieres empezar de cero:
 `docker compose down -v` (borra los volúmenes).
+
+## Despliegue en producción (un servidor con Docker)
+
+`docker-compose.prod.yml` levanta **todo** en contenedores: las dos bases de datos, Redis, los tres
+microservicios, el frontend compilado, el API Gateway (NGINX) y Caddy para el HTTPS. Solo Caddy
+expone puertos (80/443); lo demás vive en la red interna de Docker.
+
+```
+Internet ──443──▶ Caddy (TLS) ──▶ api-gateway (NGINX :8080) ─┬─ /api/auth, /api/wellbeing, /api/chats ─▶ wellbeing
+                                                              ├─ /api/proyectos, /api/talleres, ...  ─▶ marketplace
+                                                              ├─ /api/notificaciones, /ws          ─▶ realtime
+                                                              └─ /                                  ─▶ frontend (SPA)
+```
+
+### Requisitos del servidor
+
+- Linux con Docker Engine 24+ y el plugin `docker compose` (2 vCPU y 4 GB de RAM son suficientes).
+- Puertos 80 y 443 abiertos. Con TURN, además 3478/udp+tcp y 49160-49200/udp.
+- Un dominio cuyo registro DNS `A` apunte a la IP del servidor. Si no tienes uno, usa
+  `<ip-con-guiones>.sslip.io` (p. ej. `203-0-113-10.sslip.io`). **El HTTPS es obligatorio**: el
+  navegador solo enciende la cámara y el micrófono de la sala de video en un origen seguro.
+
+### Pasos
+
+```bash
+mkdir zeal && cd zeal
+for repo in zeal-infra-compose zeal-wellbeing-service zeal-marketplace-service zeal-realtime-gateway zeal-frontend-client; do
+  git clone git@github.com:ZEAL-Desarrollo-con-proposito/$repo.git
+done
+cd zeal-infra-compose
+cp .env.prod.example .env.prod   # completa dominio, PUBLIC_URL y secretos (openssl rand -base64 48)
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+docker compose -f docker-compose.prod.yml --env-file .env.prod ps   # todo "healthy" en ~2 min
+curl -s https://TU-DOMINIO/gateway/health
+```
+
+Para actualizar: `git pull` en cada repositorio y repetir el `up -d --build`. Los datos persisten
+en los volúmenes `zeal-prod_*`.
+
+Con `DEMO_DATA_ENABLED=true` los servicios siembran psicólogos, citas, convocatorias y talleres con
+fechas relativas al primer arranque. Los usuarios de demostración son los de la migración `V2`
+(contraseña `Zeal2026*`). Para regenerar la demo con fechas frescas antes de una presentación:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod down -v   # ⚠ borra todos los datos
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+```
+
+### Videollamadas detrás de redes restrictivas (TURN)
+
+Con solo STUN, dos personas detrás de NAT simétrico o de un firewall corporativo pueden no lograr
+conectar el video. El perfil `turn` añade un relé coturn en el mismo servidor:
+
+```bash
+# en .env.prod
+TURN_URLS=turn:TU-DOMINIO:3478?transport=udp,turn:TU-DOMINIO:3478?transport=tcp
+TURN_USERNAME=zeal
+TURN_CREDENTIAL=<openssl rand -hex 16>
+PUBLIC_IP=<IP pública del servidor>
+
+docker compose -f docker-compose.prod.yml --env-file .env.prod --profile turn up -d
+```

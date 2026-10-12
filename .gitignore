@@ -33,3 +33,7 @@ build/
 .vscode/
 
 node_modules/
+
+### Secretos de despliegue ###
+.env
+.env.prod
