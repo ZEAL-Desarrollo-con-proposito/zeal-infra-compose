@@ -87,6 +87,9 @@ services:
       DB_URL: jdbc:postgresql://postgres-marketplace:5432/zeal_marketplace_db
       DB_USERNAME: zeal_user
       DB_PASSWORD: ${MARKETPLACE_DB_PASSWORD}
+      LIVEKIT_PUBLIC_URL: /livekit
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-zeal}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
     depends_on:
       postgres-marketplace: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -102,6 +105,30 @@ services:
     depends_on:
       redis: { condition: service_healthy }
       wellbeing: { condition: service_healthy }
+
+  # SFU de las videollamadas grupales de los talleres (LiveKit). La señalización entra por el
+  # gateway en /livekit; el audio/video usa UDP 50000-50100 o TCP 7881 directo a la VM.
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    restart: unless-stopped
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-zeal}: ${LIVEKIT_API_SECRET:?Define LIVEKIT_API_SECRET (mínimo 32 caracteres) en .env.prod}"
+      # En Azure LiveKit descubre la IP pública de la VM por STUN. Solo para pruebas en un equipo local:
+      # LIVEKIT_USE_EXTERNAL_IP=false y LIVEKIT_NODE_IP=127.0.0.1.
+      NODE_IP: ${LIVEKIT_NODE_IP:-}
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          tcp_port: 7881
+          port_range_start: 50000
+          port_range_end: 50100
+          use_external_ip: ${LIVEKIT_USE_EXTERNAL_IP:-true}
+        room:
+          empty_timeout: 300
+          max_participants: 250
+    ports:
+      - "7881:7881"
+      - "50000-50100:50000-50100/udp"
 
   frontend:
     build: ../zeal-frontend-client
@@ -123,6 +150,7 @@ services:
       marketplace: { condition: service_healthy }
       realtime: { condition: service_healthy }
       frontend: { condition: service_healthy }
+      livekit: { condition: service_started }
 
   caddy:
     image: caddy:2.10-alpine

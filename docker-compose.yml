@@ -52,6 +52,28 @@ services:
       timeout: 3s
       retries: 10
 
+  # SFU de las videollamadas grupales de los talleres. El navegador entra por el gateway (/livekit)
+  # y envía el audio/video por UDP 50000-50100 (o TCP 7881 si la red bloquea UDP).
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    container_name: zeal-livekit
+    restart: unless-stopped
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-zeal-dev}: ${LIVEKIT_API_SECRET:-ZealLiveKitDevSecretKeyMinimum32Chars!!}"
+      NODE_IP: 127.0.0.1
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          tcp_port: 7881
+          port_range_start: 50000
+          port_range_end: 50100
+          use_external_ip: false
+        room:
+          empty_timeout: 300
+    ports:
+      - "7881:7881"
+      - "50000-50100:50000-50100/udp"
+
   # API Gateway: punto de entrada único del frontend (VITE_API_BASE_URL=http://localhost:8080).
   api-gateway:
     image: nginx:1.27-alpine
@@ -63,6 +85,8 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - livekit
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
       interval: 10s
