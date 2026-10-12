@@ -4,6 +4,7 @@
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 #
 # Solo Caddy publica puertos (80/443); bases de datos, Redis y microservicios quedan en la red interna.
+# Los límites de memoria permiten correr todo en una VM de 4 GB (la JVM usa el 75 % del límite como heap).
 name: zeal-prod
 
 x-service-env: &service-env
@@ -61,6 +62,7 @@ services:
   wellbeing:
     build: ../zeal-wellbeing-service
     image: zeal/wellbeing-service:latest
+    mem_limit: 768m
     restart: unless-stopped
     environment:
       <<: *service-env
@@ -78,6 +80,7 @@ services:
   marketplace:
     build: ../zeal-marketplace-service
     image: zeal/marketplace-service:latest
+    mem_limit: 768m
     restart: unless-stopped
     environment:
       <<: *service-env
@@ -91,6 +94,7 @@ services:
   realtime:
     build: ../zeal-realtime-gateway
     image: zeal/realtime-gateway:latest
+    mem_limit: 512m
     restart: unless-stopped
     environment:
       <<: *service-env
