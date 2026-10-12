@@ -1,20 +1,20 @@
-version: '3.8'
-
+# Infraestructura local de ZEAL. Los microservicios Spring Boot corren en el host (./mvnw spring-boot:run);
+# aquí viven las bases de datos (una por bounded context), el broker de eventos y el API Gateway.
 services:
   postgres-wellbeing:
     image: postgres:15-alpine
     container_name: zeal-postgres-wellbeing
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_DB: zeal_wellbeing_db
-      POSTGRES_USER: zeal_user
-      POSTGRES_PASSWORD: zeal_password
+      POSTGRES_USER: ${POSTGRES_USER:-zeal_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zeal_password}
     ports:
       - "5432:5432"
     volumes:
       - postgres_wellbeing_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U zeal_user -d zeal_wellbeing_db"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d zeal_wellbeing_db"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -22,17 +22,17 @@ services:
   postgres-marketplace:
     image: postgres:15-alpine
     container_name: zeal-postgres-marketplace
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_DB: zeal_marketplace_db
-      POSTGRES_USER: zeal_user
-      POSTGRES_PASSWORD: zeal_password
+      POSTGRES_USER: ${POSTGRES_USER:-zeal_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zeal_password}
     ports:
       - "5433:5432"
     volumes:
       - postgres_marketplace_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U zeal_user -d zeal_marketplace_db"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d zeal_marketplace_db"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -40,10 +40,36 @@ services:
   redis-broker:
     image: redis:7-alpine
     container_name: zeal-redis-broker
-    restart: always
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # API Gateway: punto de entrada único del frontend (VITE_API_BASE_URL=http://localhost:8080).
+  api-gateway:
+    image: nginx:1.27-alpine
+    container_name: zeal-api-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   postgres_wellbeing_data:
   postgres_marketplace_data:
+  redis_data:

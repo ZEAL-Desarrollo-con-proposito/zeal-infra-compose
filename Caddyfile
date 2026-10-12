@@ -1,0 +1,7 @@
+# Terminación TLS. Con un dominio en SITE_ADDRESS (p. ej. zeal.midominio.com), Caddy obtiene y
+# renueva el certificado de Let's Encrypt automáticamente. La cámara y el micrófono de la sala
+# de video solo funcionan en HTTPS (o en localhost).
+{$SITE_ADDRESS::80} {
+	encode gzip
+	reverse_proxy api-gateway:8080
+}

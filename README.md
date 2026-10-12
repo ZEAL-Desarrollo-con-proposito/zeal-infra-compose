@@ -1,16 +1,115 @@
-# Servicio Zeal Wellbeing
+# zeal-infra-compose
 
-Servicio Spring Boot para gestionar la disponibilidad recurrente de psicólogos y la reserva de citas.
+Orquestación local de ZEAL: bases de datos por bounded context, broker de eventos, API Gateway y
+pruebas de sustentación de los retos de concurrencia y tiempo real.
 
-## Ejecución local
+| Componente | Puerto | Rol |
+|---|---|---|
+| `api-gateway` (NGINX) | 8080 | Punto de entrada único del frontend (`VITE_API_BASE_URL=http://localhost:8080`) |
+| `postgres-wellbeing` | 5432 | Wellbeing Domain (citas, chat: datos clínicos aislados) |
+| `postgres-marketplace` | 5433 | Business Domain (convocatorias y talleres) |
+| `redis-broker` | 6379 | Message Bus (Pub/Sub) y notificaciones |
+| `zeal-wellbeing-service` | 8081 | corre en el host |
+| `zeal-marketplace-service` | 8082 | corre en el host |
+| `zeal-realtime-gateway` | 8083 | corre en el host (STOMP/SockJS en `/ws`) |
 
-Inicia la infraestructura con `docker compose up -d` y luego ejecuta `./mvnw spring-boot:run` (en Windows: `mvnw.cmd spring-boot:run`). La configuración de conexión a PostgreSQL y Redis puede sobrescribirse mediante las variables `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `REDIS_HOST` y `REDIS_PORT`.
+## Arranque
 
-El servicio utiliza PostgreSQL para la persistencia. Las actualizaciones automáticas del esquema mediante Hibernate están habilitadas por defecto para el desarrollo local; establece `DDL_AUTO=validate` al desplegar la aplicación utilizando migraciones de esquema gestionadas.
+```bash
+docker compose up -d && docker compose ps      # esperar "healthy"
+(cd ../zeal-wellbeing-service   && ./mvnw spring-boot:run)
+(cd ../zeal-marketplace-service && ./mvnw spring-boot:run)
+(cd ../zeal-realtime-gateway    && ./mvnw spring-boot:run)
+curl -s localhost:8080/gateway/health
+```
 
-## API
+## Enrutamiento del API Gateway
 
-- `GET /api/psychologists/availability?from=YYYY-MM-DD&to=YYYY-MM-DD` — lista los psicólogos y los espacios disponibles (sesiones) para el rango de fechas indicado (inclusive).
-- `POST /api/reservations` — reserva una sesión disponible (`psychologistId`, `employeeId`, `startsAt` en formato ISO-8601).
+| Prefijo | Servicio |
+|---|---|
+| `/api/auth`, `/api/wellbeing`, `/api/chats` | wellbeing (8081) |
+| `/api/proyectos`, `/api/postulaciones`, `/api/talleres`, `/api/inscripciones`, `/api/admin` | marketplace (8082) |
+| `/api/notificaciones`, `/api/presencia`, `/ws` | realtime-gateway (8083) |
 
-Las reservas que entren en conflicto con una cita ya existente devolverán un código `409 Conflict`. El horario recurrente se interpreta según la zona horaria de cada regla, por lo que se aplican los cambios de horario de verano/invierno al generar las sesiones. Los cambios en las reservas se difunden a los clientes STOMP conectados a través del canal `/topic/availability`; los clientes deben conectarse a `/ws`. Redis Pub/Sub distribuye dichas actualizaciones entre las distintas instancias del servicio.
+## Pruebas de sustentación
+
+Con todo levantado (y `DEMO_DATA_ENABLED=true`, el valor por defecto):
+
+```bash
+node tests/concurrency/c1-overbooking.mjs      # 500 postulaciones → 10 ACEPTADA, 490 EN_ESPERA, occupied=10
+node tests/concurrency/c2-double-booking.mjs   # 100 reservas a la misma franja → 1×201, 99×409
+node tests/concurrency/c3-freed-slot-race.mjs  # 50 candidatos por un cupo liberado → 1×200, 49×409
+(cd tests/realtime && npm install && npm test) # RT-1 (latencia del chat), RT-2 y RT-3, 22 verificaciones
+```
+
+Las pruebas de carga firman tokens con el secreto de **desarrollo** para simular cientos de
+personas distintas; no funcionan (ni deben funcionar) contra un entorno con otro `JWT_SECRET`.
+Cada ejecución crea su propia convocatoria/franjas, así que se pueden repetir.
+
+## Datos
+
+Los servicios usan esquemas propios (`wellbeing`, `marketplace`) gestionados con Flyway. Las tablas
+del esquema `public` de versiones anteriores ya no se usan; si quieres empezar de cero:
+`docker compose down -v` (borra los volúmenes).
+
+## Despliegue en producción (un servidor con Docker)
+
+`docker-compose.prod.yml` levanta **todo** en contenedores: las dos bases de datos, Redis, los tres
+microservicios, el frontend compilado, el API Gateway (NGINX) y Caddy para el HTTPS. Solo Caddy
+expone puertos (80/443); lo demás vive en la red interna de Docker.
+
+```
+Internet ──443──▶ Caddy (TLS) ──▶ api-gateway (NGINX :8080) ─┬─ /api/auth, /api/wellbeing, /api/chats ─▶ wellbeing
+                                                              ├─ /api/proyectos, /api/talleres, ...  ─▶ marketplace
+                                                              ├─ /api/notificaciones, /ws          ─▶ realtime
+                                                              └─ /                                  ─▶ frontend (SPA)
+```
+
+### Requisitos del servidor
+
+- Linux con Docker Engine 24+ y el plugin `docker compose` (2 vCPU y 4 GB de RAM son suficientes).
+- Puertos 80 y 443 abiertos. Con TURN, además 3478/udp+tcp y 49160-49200/udp.
+- Un dominio cuyo registro DNS `A` apunte a la IP del servidor. Si no tienes uno, usa
+  `<ip-con-guiones>.sslip.io` (p. ej. `203-0-113-10.sslip.io`). **El HTTPS es obligatorio**: el
+  navegador solo enciende la cámara y el micrófono de la sala de video en un origen seguro.
+
+### Pasos
+
+```bash
+mkdir zeal && cd zeal
+for repo in zeal-infra-compose zeal-wellbeing-service zeal-marketplace-service zeal-realtime-gateway zeal-frontend-client; do
+  git clone git@github.com:ZEAL-Desarrollo-con-proposito/$repo.git
+done
+cd zeal-infra-compose
+cp .env.prod.example .env.prod   # completa dominio, PUBLIC_URL y secretos (openssl rand -base64 48)
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+docker compose -f docker-compose.prod.yml --env-file .env.prod ps   # todo "healthy" en ~2 min
+curl -s https://TU-DOMINIO/gateway/health
+```
+
+Para actualizar: `git pull` en cada repositorio y repetir el `up -d --build`. Los datos persisten
+en los volúmenes `zeal-prod_*`.
+
+Con `DEMO_DATA_ENABLED=true` los servicios siembran psicólogos, citas, convocatorias y talleres con
+fechas relativas al primer arranque. Los usuarios de demostración son los de la migración `V2`
+(contraseña `Zeal2026*`). Para regenerar la demo con fechas frescas antes de una presentación:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod down -v   # ⚠ borra todos los datos
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+```
+
+### Videollamadas detrás de redes restrictivas (TURN)
+
+Con solo STUN, dos personas detrás de NAT simétrico o de un firewall corporativo pueden no lograr
+conectar el video. El perfil `turn` añade un relé coturn en el mismo servidor:
+
+```bash
+# en .env.prod
+TURN_URLS=turn:TU-DOMINIO:3478?transport=udp,turn:TU-DOMINIO:3478?transport=tcp
+TURN_USERNAME=zeal
+TURN_CREDENTIAL=<openssl rand -hex 16>
+PUBLIC_IP=<IP pública del servidor>
+
+docker compose -f docker-compose.prod.yml --env-file .env.prod --profile turn up -d
+```

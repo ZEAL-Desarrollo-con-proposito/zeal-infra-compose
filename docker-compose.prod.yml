@@ -1,0 +1,164 @@
+# Despliegue completo de ZEAL en un solo servidor con Docker.
+# Requiere los repositorios hermanos clonados junto a este (../zeal-wellbeing-service, etc.) y un .env
+# creado a partir de .env.prod.example. Uso:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#
+# Solo Caddy publica puertos (80/443); bases de datos, Redis y microservicios quedan en la red interna.
+name: zeal-prod
+
+x-service-env: &service-env
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET (mínimo 32 caracteres) en .env.prod}
+  JWT_ISSUER: zeal
+  APP_TIME_ZONE: ${APP_TIME_ZONE:-America/Bogota}
+  CORS_ALLOWED_ORIGINS: ${PUBLIC_URL:?Define PUBLIC_URL (p. ej. https://zeal.midominio.com) en .env.prod}
+  DEMO_DATA_ENABLED: ${DEMO_DATA_ENABLED:-true}
+
+services:
+  postgres-wellbeing:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zeal_wellbeing_db
+      POSTGRES_USER: zeal_user
+      POSTGRES_PASSWORD: ${WELLBEING_DB_PASSWORD:?Define WELLBEING_DB_PASSWORD en .env.prod}
+    volumes:
+      - wellbeing_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zeal_user -d zeal_wellbeing_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-marketplace:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zeal_marketplace_db
+      POSTGRES_USER: zeal_user
+      POSTGRES_PASSWORD: ${MARKETPLACE_DB_PASSWORD:?Define MARKETPLACE_DB_PASSWORD en .env.prod}
+    volumes:
+      - marketplace_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zeal_user -d zeal_marketplace_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  wellbeing:
+    build: ../zeal-wellbeing-service
+    image: zeal/wellbeing-service:latest
+    restart: unless-stopped
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:postgresql://postgres-wellbeing:5432/zeal_wellbeing_db
+      DB_USERNAME: zeal_user
+      DB_PASSWORD: ${WELLBEING_DB_PASSWORD}
+      ROOM_ICE_SERVERS: ${ROOM_ICE_SERVERS:-stun:stun.l.google.com:19302}
+      TURN_URLS: ${TURN_URLS:-}
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
+    depends_on:
+      postgres-wellbeing: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  marketplace:
+    build: ../zeal-marketplace-service
+    image: zeal/marketplace-service:latest
+    restart: unless-stopped
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:postgresql://postgres-marketplace:5432/zeal_marketplace_db
+      DB_USERNAME: zeal_user
+      DB_PASSWORD: ${MARKETPLACE_DB_PASSWORD}
+    depends_on:
+      postgres-marketplace: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  realtime:
+    build: ../zeal-realtime-gateway
+    image: zeal/realtime-gateway:latest
+    restart: unless-stopped
+    environment:
+      <<: *service-env
+      WELLBEING_BASE_URL: http://wellbeing:8081
+    depends_on:
+      redis: { condition: service_healthy }
+      wellbeing: { condition: service_healthy }
+
+  frontend:
+    build: ../zeal-frontend-client
+    image: zeal/frontend-client:latest
+    restart: unless-stopped
+
+  api-gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    depends_on:
+      wellbeing: { condition: service_healthy }
+      marketplace: { condition: service_healthy }
+      realtime: { condition: service_healthy }
+      frontend: { condition: service_healthy }
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api-gateway: { condition: service_healthy }
+
+  # Relé TURN opcional para videollamadas en redes restrictivas: docker compose --profile turn up -d
+  # Requiere abrir 3478/udp+tcp y 49160-49200/udp en el firewall del servidor.
+  coturn:
+    image: coturn/coturn:4.7
+    profiles: ["turn"]
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - -n
+      - --log-file=stdout
+      - --lt-cred-mech
+      - --fingerprint
+      - --realm=zeal
+      - --user=${TURN_USERNAME:-zeal}:${TURN_CREDENTIAL:-change-me}
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --external-ip=${PUBLIC_IP:-}
+      - --no-cli
+
+volumes:
+  wellbeing_db:
+  marketplace_db:
+  redis_data:
+  caddy_data:
+  caddy_config:
