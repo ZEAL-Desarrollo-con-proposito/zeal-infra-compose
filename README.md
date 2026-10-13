@@ -9,6 +9,7 @@ pruebas de sustentación de los retos de concurrencia y tiempo real.
 | `postgres-wellbeing` | 5432 | Wellbeing Domain (citas, chat: datos clínicos aislados) |
 | `postgres-marketplace` | 5433 | Business Domain (convocatorias y talleres) |
 | `redis-broker` | 6379 | Message Bus (Pub/Sub) y notificaciones |
+| `livekit` | 7881/tcp, 50000-50100/udp | SFU de las videollamadas grupales de los talleres (señalización por el gateway en `/livekit`) |
 | `zeal-wellbeing-service` | 8081 | corre en el host |
 | `zeal-marketplace-service` | 8082 | corre en el host |
 | `zeal-realtime-gateway` | 8083 | corre en el host (STOMP/SockJS en `/ws`) |
@@ -30,6 +31,7 @@ curl -s localhost:8080/gateway/health
 | `/api/auth`, `/api/wellbeing`, `/api/chats` | wellbeing (8081) |
 | `/api/proyectos`, `/api/postulaciones`, `/api/talleres`, `/api/inscripciones`, `/api/admin` | marketplace (8082) |
 | `/api/notificaciones`, `/api/presencia`, `/ws` | realtime-gateway (8083) |
+| `/livekit/` | livekit (7880, WebSocket; se quita el prefijo) |
 
 ## Pruebas de sustentación
 
@@ -62,13 +64,16 @@ expone puertos (80/443); lo demás vive en la red interna de Docker.
 Internet ──443──▶ Caddy (TLS) ──▶ api-gateway (NGINX :8080) ─┬─ /api/auth, /api/wellbeing, /api/chats ─▶ wellbeing
                                                               ├─ /api/proyectos, /api/talleres, ...  ─▶ marketplace
                                                               ├─ /api/notificaciones, /ws          ─▶ realtime
+                                                              ├─ /livekit/  (señalización de video) ─▶ livekit (SFU)
                                                               └─ /                                  ─▶ frontend (SPA)
+Internet ──UDP 50000-50100 / TCP 7881──▶ livekit  (audio y video de los talleres)
 ```
 
 ### Requisitos del servidor
 
 - Linux con Docker Engine 24+ y el plugin `docker compose` (2 vCPU y 4 GB de RAM son suficientes).
-- Puertos 80 y 443 abiertos. Con TURN, además 3478/udp+tcp y 49160-49200/udp.
+- Puertos 80 y 443 abiertos, más **7881/tcp y 50000-50100/udp** para el video de los talleres
+  (LiveKit). Con TURN, además 3478/udp+tcp y 49160-49200/udp.
 - Un dominio cuyo registro DNS `A` apunte a la IP del servidor. Si no tienes uno, usa
   `<ip-con-guiones>.sslip.io` (p. ej. `203-0-113-10.sslip.io`). **El HTTPS es obligatorio**: el
   navegador solo enciende la cámara y el micrófono de la sala de video en un origen seguro.
@@ -98,6 +103,22 @@ fechas relativas al primer arranque. Los usuarios de demostración son los de la
 docker compose -f docker-compose.prod.yml --env-file .env.prod down -v   # ⚠ borra todos los datos
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 ```
+
+### Videollamadas grupales de los talleres (LiveKit)
+
+Los talleres tienen sala de video grupal. Marketplace firma el permiso de entrada (solo para la
+empresa anfitriona y las personas inscritas). El navegador se conecta a LiveKit por el gateway
+(`wss://TU-DOMINIO/livekit`) y envía el audio y el video directo a la VM por UDP 50000-50100, o
+por TCP 7881 si su red bloquea UDP.
+
+1. En `.env.prod` define `LIVEKIT_API_SECRET` (`openssl rand -hex 32`).
+2. Abre los puertos en el firewall de la VM. En Azure: **VM → Redes → Agregar regla de puerto de
+   entrada**, una para `7881` TCP y otra para `50000-50100` UDP. O con la CLI:
+   `az vm open-port -g rg-zeal -n vm-zeal --port 7881,50000-50100 --priority 920`.
+3. `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`.
+
+LiveKit descubre la IP pública de la VM por STUN. Para probar el stack en un equipo local (sin IP
+pública) agrega `LIVEKIT_USE_EXTERNAL_IP=false` y `LIVEKIT_NODE_IP=127.0.0.1`.
 
 ### Videollamadas detrás de redes restrictivas (TURN)
 
