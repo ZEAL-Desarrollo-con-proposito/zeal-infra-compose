@@ -28,7 +28,7 @@ curl -s localhost:8080/gateway/health
 
 | Prefijo | Servicio |
 |---|---|
-| `/api/auth`, `/api/wellbeing`, `/api/chats` | wellbeing (8081) |
+| `/api/auth`, `/api/wellbeing`, `/api/chats`, `/api/organizacion` | wellbeing (8081) |
 | `/api/proyectos`, `/api/postulaciones`, `/api/talleres`, `/api/inscripciones`, `/api/admin` | marketplace (8082) |
 | `/api/notificaciones`, `/api/presencia`, `/ws` | realtime-gateway (8083) |
 | `/livekit/` | livekit (7880, WebSocket; se quita el prefijo) |
@@ -93,7 +93,12 @@ curl -s https://TU-DOMINIO/gateway/health
 ```
 
 Para actualizar: `git pull` en cada repositorio y repetir el `up -d --build`. Los datos persisten
-en los volúmenes `zeal-prod_*`.
+en los volúmenes `zeal-prod_*`. NGINX lee su configuración como archivo montado: si cambió
+`nginx/nginx.prod.conf`, recrea el gateway para que tome la nueva:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --force-recreate api-gateway
+```
 
 Con `DEMO_DATA_ENABLED=true` los servicios siembran psicólogos, citas, convocatorias y talleres con
 fechas relativas al primer arranque. Los usuarios de demostración son los de la migración `V2`
