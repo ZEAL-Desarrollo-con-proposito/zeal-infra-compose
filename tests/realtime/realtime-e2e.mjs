@@ -1,10 +1,13 @@
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
+import { microsoftLogin, refresh } from '../security/lib.mjs';
 
 // Verificación de punta a punta de RT-1, RT-2 y RT-3 con el mismo cliente STOMP/SockJS del frontend.
-const WB = process.env.WELLBEING_URL ?? 'http://localhost:8081';
-const MP = process.env.MARKETPLACE_URL ?? 'http://localhost:8082';
-const RT = process.env.REALTIME_URL ?? 'http://localhost:8083';
+// Por defecto todo entra por el API Gateway (NGINX, :8080), que reparte entre las réplicas.
+const EDGE = process.env.ZEAL_API ?? 'http://localhost:8080';
+const WB = process.env.WELLBEING_URL ?? EDGE;
+const MP = process.env.MARKETPLACE_URL ?? EDGE;
+const RT = process.env.REALTIME_URL ?? EDGE;
 const results = [];
 const check = (name, ok, extra = '') => { results.push(ok); console.log(`${ok ? 'OK  ' : 'FAIL'} ${name} ${extra}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -14,7 +17,11 @@ async function http(method, url, token, body) {
   const text = await res.text();
   return { status: res.status, body: text ? JSON.parse(text) : null };
 }
-const login = async (email) => (await http('POST', `${WB}/api/auth/login`, null, { email, password: 'Zeal2026*' })).body;
+// Login real (R2-17): Microsoft vía el proveedor OIDC de prueba de docker-compose.yml + refresh.
+const login = async (email) => {
+  const { refresh: cookie } = await microsoftLogin(email);
+  return (await refresh(cookie)).body;
+};
 
 function connect(token) {
   return new Promise((resolve, reject) => {

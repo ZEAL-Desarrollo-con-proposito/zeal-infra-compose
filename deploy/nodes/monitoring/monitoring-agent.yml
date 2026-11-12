@@ -1,0 +1,26 @@
+# Agente de monitoreo para CADA nodo (borde, web, servicios, datos, medios): cAdvisor (métricas de
+# contenedores, puerto 8089 solo en la IP privada) y Alloy (envía los logs de Docker a Loki).
+#   docker compose -f monitoring-agent.yml --env-file .env up -d     (.env con PRIVATE_IP y LOKI_URL)
+name: zeal-agent
+
+services:
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    restart: unless-stopped
+    privileged: true
+    ports: ["${PRIVATE_IP:?}:8089:8080"]
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+
+  alloy:
+    image: grafana/alloy:v1.10.0
+    restart: unless-stopped
+    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data"]
+    environment:
+      LOKI_URL: ${LOKI_URL:?Define LOKI_URL (http://<IP del nodo de monitoreo>:3100/loki/api/v1/push)}
+    volumes:
+      - ./alloy.multinode.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro

@@ -1,0 +1,45 @@
+// R2-33 · Alloy recoge los logs de los contenedores (Docker) y los envía a Loki. Los servicios de ZEAL
+// escriben JSON (R2-29): se extraen level, correlationId y replica como etiquetas/metadatos, para filtrar
+// por componente y seguir una petición de punta a punta. No se indexa el mensaje ni datos personales.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.containers.output
+  forward_to    = [loki.process.zeal.receiver]
+  relabel_rules = discovery.relabel.containers.rules
+}
+
+loki.process "zeal" {
+  stage.json {
+    expressions = { level = "level", correlation_id = "correlationId", replica = "replica" }
+  }
+  stage.labels {
+    values = { level = "" }
+  }
+  stage.structured_metadata {
+    values = { correlation_id = "", replica = "" }
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

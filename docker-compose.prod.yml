@@ -59,6 +59,26 @@ services:
       timeout: 3s
       retries: 10
 
+  # Broker STOMP del Real-Time Gateway (HU-DT-01, ADR-04). Solo en la red interna.
+  rabbitmq:
+    image: rabbitmq:4.2.9-management-alpine
+    hostname: zeal-rabbitmq
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-zeal}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Define RABBITMQ_PASSWORD en .env.prod}
+    volumes:
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-zeal.conf:ro
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_port_listener 61613"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
   wellbeing:
     build: ../zeal-wellbeing-service
     image: zeal/wellbeing-service:latest
@@ -70,9 +90,17 @@ services:
       DB_USERNAME: zeal_user
       DB_PASSWORD: ${WELLBEING_DB_PASSWORD}
       ROOM_ICE_SERVERS: ${ROOM_ICE_SERVERS:-stun:stun.l.google.com:19302}
-      TURN_URLS: ${TURN_URLS:-}
-      TURN_USERNAME: ${TURN_USERNAME:-}
-      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
+      TURN_URLS: ${TURN_URLS:?Define TURN_URLS (p. ej. turn:zeal.midominio.com:3478,turns:zeal.midominio.com:5349) en .env.prod}
+      TURN_SECRET: ${TURN_SECRET}
+      LIVEKIT_PUBLIC_URL: /livekit
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-zeal}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      # R2-17: login con Microsoft Entra ID (sin contraseñas). Ver docs/cowork/RUNBOOK (paso 9).
+      OIDC_ISSUER_URI: ${OIDC_ISSUER_URI:?Define OIDC_ISSUER_URI (https://login.microsoftonline.com/<tenant>/v2.0) en .env.prod}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?Define OIDC_CLIENT_ID en .env.prod}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?Define OIDC_CLIENT_SECRET en .env.prod}
+      OIDC_REDIRECT_URI: ${PUBLIC_URL}/api/auth/microsoft/callback
+      FRONTEND_URL: ${PUBLIC_URL}
     depends_on:
       postgres-wellbeing: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -102,8 +130,15 @@ services:
     environment:
       <<: *service-env
       WELLBEING_BASE_URL: http://wellbeing:8081
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_STOMP_PORT: "61613"
+      RABBITMQ_CLIENT_LOGIN: ${RABBITMQ_USER:-zeal}
+      RABBITMQ_CLIENT_PASSCODE: ${RABBITMQ_PASSWORD}
+      RABBITMQ_SYSTEM_LOGIN: ${RABBITMQ_USER:-zeal}
+      RABBITMQ_SYSTEM_PASSCODE: ${RABBITMQ_PASSWORD}
     depends_on:
       redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
       wellbeing: { condition: service_healthy }
 
   # SFU de las videollamadas grupales de los talleres (LiveKit). La señalización entra por el
@@ -123,6 +158,17 @@ services:
           port_range_start: 50000
           port_range_end: 50100
           use_external_ip: ${LIVEKIT_USE_EXTERNAL_IP:-true}
+          turn_servers:
+            - host: ${TURN_DOMAIN:?Define TURN_DOMAIN (dominio del certificado de coturn) en .env.prod}
+              port: 3478
+              protocol: udp
+              secret: "${TURN_SECRET}"
+              ttl: 7200
+            - host: ${TURN_DOMAIN}
+              port: ${TURN_TLS_PORT:-5349}
+              protocol: tls
+              secret: "${TURN_SECRET}"
+              ttl: 7200
         room:
           empty_timeout: 300
           max_participants: 250
@@ -140,6 +186,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
       interval: 10s
@@ -168,29 +215,46 @@ services:
     depends_on:
       api-gateway: { condition: service_healthy }
 
-  # Relé TURN opcional para videollamadas en redes restrictivas: docker compose --profile turn up -d
-  # Requiere abrir 3478/udp+tcp y 49160-49200/udp en el firewall del servidor.
+  # HU-DT-02 (ADR-14): relé TURN permanente con credenciales temporales (use-auth-secret).
+  # Abrir en el firewall: 3478/udp+tcp, TURN_TLS_PORT/tcp y 49160-49200/udp. En un solo servidor el
+  # 443 lo usa Caddy, así que el TLS de TURN va en 5349; en el nodo de medios (multinodo) va en 443.
+  # Certificados: TURN_CERT_DIR con turn.crt y turn.key (los del dominio; ver docs/cowork).
   coturn:
     image: coturn/coturn:4.7
-    profiles: ["turn"]
     restart: unless-stopped
     network_mode: host
+    volumes:
+      - ${TURN_CERT_DIR:-./coturn/certs}:/etc/coturn/certs:ro
     command:
       - -n
       - --log-file=stdout
-      - --lt-cred-mech
       - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:?Define TURN_SECRET en .env.prod}
       - --realm=zeal
-      - --user=${TURN_USERNAME:-zeal}:${TURN_CREDENTIAL:-change-me}
       - --listening-port=3478
+      - --tls-listening-port=${TURN_TLS_PORT:-5349}
+      - --cert=/etc/coturn/certs/turn.crt
+      - --pkey=/etc/coturn/certs/turn.key
       - --min-port=49160
       - --max-port=49200
-      - --external-ip=${PUBLIC_IP:-}
+      - --external-ip=${PUBLIC_IP:?Define PUBLIC_IP (IP pública de la VM) en .env.prod}
       - --no-cli
+      - --no-multicast-peers
+      # El relé no debe alcanzar la red interna (salvo LiveKit, que publica en la IP pública).
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+    healthcheck:
+      test: ["CMD-SHELL", "turnutils_stunclient -p 3478 127.0.0.1 > /dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   wellbeing_db:
   marketplace_db:
   redis_data:
+  rabbitmq_data:
   caddy_data:
   caddy_config:

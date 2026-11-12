@@ -1,0 +1,18 @@
+# Depuración con los microservicios en el host:
+#   docker compose -f docker-compose.yml -f docker-compose.host-dev.yml up -d
+#   (cd ../zeal-wellbeing-service && ./mvnw spring-boot:run)   # y los otros dos
+# Levanta solo la infraestructura (bases, Redis, RabbitMQ, LiveKit) y NGINX apuntando al host.
+services:
+  wellbeing:
+    deploy: { replicas: 0 }
+  marketplace:
+    deploy: { replicas: 0 }
+  realtime:
+    deploy: { replicas: 0 }
+  api-gateway:
+    volumes: !override
+      - ./nginx/nginx.host-dev.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: !reset {}

@@ -1,0 +1,17 @@
+# R2-33 / R2-15 · Enrutamiento de alertas. Local: el receptor "equipo" escribe a un webhook de prueba.
+# Cowork: reemplazar por el canal real (correo, Teams, Discord…) — ver docs/cowork/CHECKLIST_COWORK.md.
+route:
+  receiver: equipo
+  group_by: [alertname, job]
+  group_wait: 10s        # SEG-4/OBS-1: el aviso sale en segundos, no en minutos
+  group_interval: 1m
+  repeat_interval: 2h
+  routes:
+    - matchers: [scenario="SEG-4"]
+      receiver: equipo
+      group_wait: 0s
+receivers:
+  - name: equipo
+    webhook_configs:
+      - url: http://alert-sink:8080/
+        send_resolved: true

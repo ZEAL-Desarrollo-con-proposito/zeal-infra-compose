@@ -1,0 +1,38 @@
+# R2-33 · Prometheus del entorno local (docker-compose.yml + docker-compose.monitoring.yml).
+# Las réplicas se descubren por el DNS de Docker (un registro A por réplica): escalar un servicio no
+# requiere tocar esta configuración. Multinodo: ver prometheus.multinode.yml.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: local
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: wellbeing
+    metrics_path: /actuator/prometheus
+    dns_sd_configs: [{ names: ["wellbeing"], type: A, port: 8081, refresh_interval: 15s }]
+  - job_name: marketplace
+    metrics_path: /actuator/prometheus
+    dns_sd_configs: [{ names: ["marketplace"], type: A, port: 8082, refresh_interval: 15s }]
+  - job_name: realtime
+    metrics_path: /actuator/prometheus
+    dns_sd_configs: [{ names: ["realtime"], type: A, port: 8083, refresh_interval: 15s }]
+  - job_name: business-metrics
+    metrics_path: /actuator/prometheus
+    dns_sd_configs: [{ names: ["business-metrics"], type: A, port: 8084, refresh_interval: 15s }]
+  - job_name: rabbitmq
+    static_configs: [{ targets: ["rabbitmq:15692"] }]
+  - job_name: postgres
+    static_configs: [{ targets: ["postgres-exporter-wellbeing:9187", "postgres-exporter-marketplace:9187"] }]
+  - job_name: redis
+    static_configs: [{ targets: ["redis-exporter:9121"] }]
+  - job_name: cadvisor
+    static_configs: [{ targets: ["cadvisor:8080"] }]

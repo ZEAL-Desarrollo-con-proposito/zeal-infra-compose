@@ -1,0 +1,17 @@
+# Borde multinodo: HTTPS automático y todo hacia NGINX. Grafana (R2-33) queda tras el borde en
+# /grafana, protegido por su propio login (y opcionalmente por IP de oficina: ver runbook).
+{$SITE_ADDRESS} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+	handle /grafana* {
+		reverse_proxy {$GRAFANA_UPSTREAM}
+	}
+	handle {
+		reverse_proxy api-gateway:8080
+	}
+}

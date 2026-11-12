@@ -1,0 +1,99 @@
+# R2-33 · Monitoreo del entorno local. Se suma a docker-compose.yml (misma red):
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+# Grafana: http://localhost:3001 (admin / GRAFANA_ADMIN_PASSWORD) · Prometheus: http://localhost:9090
+# Solo escuchan en 127.0.0.1. En multinodo: deploy/nodes/monitoring (Grafana tras el borde).
+services:
+  business-metrics:   # R2-31: consumidor nuevo de eventos de dominio (MANT-2)
+    build: ./services/zeal-business-metrics
+    image: zeal/business-metrics:latest
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      REDIS_HOST: redis-broker
+    depends_on:
+      redis-broker: { condition: service_healthy }
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=15d", "--web.enable-lifecycle"]
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    ports: ["127.0.0.1:9090:9090"]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports: ["127.0.0.1:9093:9093"]
+
+  # Receptor de prueba de las alertas (muestra en su log lo que llegaría al canal real).
+  alert-sink:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    command: ["sh", "-c", "printf 'events{} http{ log_format body escape=json \\x27$$request_body\\x27; server{ listen 8080; location / { access_log /dev/stdout body; proxy_pass http://127.0.0.1:8081; } } server{ listen 8081; location / { return 200; } } }' > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"]
+
+  loki:
+    image: grafana/loki:3.5.3
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./monitoring/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+
+  alloy:
+    image: grafana/alloy:v1.10.0
+    restart: unless-stopped
+    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data"]
+    volumes:
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on: [loki]
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+
+  postgres-exporter-wellbeing:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-zeal_user}:${POSTGRES_PASSWORD:-zeal_password}@postgres-wellbeing:5432/zeal_wellbeing_db?sslmode=disable
+  postgres-exporter-marketplace:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-zeal_user}:${POSTGRES_PASSWORD:-zeal_password}@postgres-marketplace:5432/zeal_marketplace_db?sslmode=disable
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.74.0
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis-broker:6379
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-zeal-dev-grafana}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports: ["127.0.0.1:3001:3000"]
+    depends_on: [prometheus, loki]
+
+volumes:
+  prometheus_data:
+  loki_data:
+  grafana_data:

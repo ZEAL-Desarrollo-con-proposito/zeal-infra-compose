@@ -1,5 +1,27 @@
-# Infraestructura local de ZEAL. Los microservicios Spring Boot corren en el host (./mvnw spring-boot:run);
-# aquí viven las bases de datos (una por bounded context), el broker de eventos y el API Gateway.
+# Entorno local completo de ZEAL: dos réplicas de cada microservicio detrás de NGINX (HU-BE-19).
+#
+#   cp .env.example .env            # opcional: los valores por defecto sirven para desarrollo
+#   docker compose up -d --build    # construye desde los repos hermanos (../zeal-*-service)
+#   docker compose ps               # esperar "healthy" en todo
+#
+# El frontend entra por http://localhost:8080 (VITE_API_BASE_URL). Para correr un servicio en el host
+# mientras se depura, ver docker-compose.host-dev.yml.
+
+x-service-env: &service-env
+  REDIS_HOST: redis-broker
+  REDIS_PORT: "6379"
+  JWT_SECRET: ${JWT_SECRET:-ZealMVP2026ArchitectureSoftwareSecretKeyMinimum256Bits!!}
+  JWT_ISSUER: zeal
+  APP_TIME_ZONE: ${APP_TIME_ZONE:-America/Bogota}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+  DEMO_DATA_ENABLED: ${DEMO_DATA_ENABLED:-true}
+
+x-replicated: &replicated
+  restart: unless-stopped
+  deploy:
+    replicas: ${SERVICE_REPLICAS:-2}
+  stop_grace_period: 30s
+
 services:
   postgres-wellbeing:
     image: postgres:15-alpine
@@ -52,8 +74,31 @@ services:
       timeout: 3s
       retries: 10
 
-  # SFU de las videollamadas grupales de los talleres. El navegador entra por el gateway (/livekit)
-  # y envía el audio/video por UDP 50000-50100 (o TCP 7881 si la red bloquea UDP).
+  # Broker STOMP compartido por las réplicas del Real-Time Gateway (HU-DT-01, ADR-04).
+  rabbitmq:
+    image: rabbitmq:4.2.9-management-alpine
+    container_name: zeal-rabbitmq
+    hostname: zeal-rabbitmq   # El nombre del nodo (y sus datos en el volumen) dependen del hostname.
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-zeal}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-zeal-dev-password}
+    ports:
+      - "61613:61613"            # STOMP, para correr el gateway en el host
+      - "127.0.0.1:15672:15672"  # Consola de administración, solo desde este equipo
+    volumes:
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-zeal.conf:ro
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_port_listener 61613"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  # SFU de las videollamadas (talleres y, desde HU-DT-02, citas 1:1). El navegador entra por el
+  # gateway (/livekit) y envía el audio/video por UDP 50000-50100 (o TCP 7881 si la red bloquea UDP).
   livekit:
     image: livekit/livekit-server:v1.13.7
     container_name: zeal-livekit
@@ -68,13 +113,146 @@ services:
           port_range_start: 50000
           port_range_end: 50100
           use_external_ip: false
+          # HU-DT-02: LiveKit entrega a cada navegador el relé coturn con credenciales temporales
+          # (mismo secreto que coturn). El navegador lo usa si no logra la conexión directa.
+          turn_servers:
+            - host: 127.0.0.1
+              port: 3478
+              protocol: udp
+              secret: "${TURN_SECRET:-ZealTurnDevSecretOnlyForLocal}"
+              ttl: 7200
+            - host: localhost
+              port: ${TURN_TLS_PORT:-5349}
+              protocol: tls
+              secret: "${TURN_SECRET:-ZealTurnDevSecretOnlyForLocal}"
+              ttl: 7200
         room:
           empty_timeout: 300
     ports:
       - "7881:7881"
       - "50000-50100:50000-50100/udp"
 
-  # API Gateway: punto de entrada único del frontend (VITE_API_BASE_URL=http://localhost:8080).
+  # HU-DT-02 (ADR-14): relé TURN permanente. Credenciales temporales firmadas con TURN_SECRET
+  # (use-auth-secret): wellbeing y LiveKit las emiten, en la configuración no hay contraseñas fijas.
+  # network_mode host: el relé necesita sus puertos reales (Linux). Puertos: 3478 udp/tcp, TLS en
+  # TURN_TLS_PORT (5349 en local; 443 en el nodo de medios) y relé 49160-49200/udp.
+  # Certificado TLS de desarrollo: ./coturn/generate-dev-cert.sh (sin él, coturn arranca sin TLS).
+  coturn:
+    image: coturn/coturn:4.7
+    container_name: zeal-coturn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./coturn/certs:/etc/coturn/certs:ro
+    command:
+      - -n
+      - --log-file=stdout
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:-ZealTurnDevSecretOnlyForLocal}
+      - --realm=zeal
+      - --listening-port=3478
+      - --tls-listening-port=${TURN_TLS_PORT:-5349}
+      - --cert=/etc/coturn/certs/turn.crt
+      - --pkey=/etc/coturn/certs/turn.key
+      - --min-port=49160
+      - --max-port=49200
+      - --no-cli
+      - --no-multicast-peers
+      # Local: LiveKit escucha en 127.0.0.1. En el nodo de medios se quita y se permite solo su IP.
+      - --allow-loopback-peers
+    healthcheck:
+      test: ["CMD-SHELL", "turnutils_stunclient -p 3478 127.0.0.1 > /dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # R2-17 (local): proveedor OIDC de prueba en lugar de Microsoft Entra ID. El navegador lo usa en
+  # http://localhost:8090 (pantalla de login: escribe cualquier usuario y en "claims" el correo de una
+  # cuenta semilla, p. ej. {"email": "david.cajamarca@nexura.co"}); wellbeing en http://mock-oidc:8080.
+  mock-oidc:
+    image: ghcr.io/navikt/mock-oauth2-server:2.3.0
+    container_name: zeal-mock-oidc
+    restart: unless-stopped
+    environment:
+      JSON_CONFIG: '{"interactiveLogin": true}'
+    ports:
+      - "8090:8080"
+
+  wellbeing:
+    <<: *replicated
+    build: ../zeal-wellbeing-service
+    image: zeal/wellbeing-service:latest
+    mem_limit: 768m
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:postgresql://postgres-wellbeing:5432/zeal_wellbeing_db
+      # R2-14: la app usa un rol sin DDL ni UPDATE/DELETE sobre la auditoría; Flyway, el propietario.
+      DB_USERNAME: ${DB_APP_USER:-zeal_app}
+      DB_PASSWORD: ${DB_APP_PASSWORD:-zeal_app_dev_password}
+      SPRING_FLYWAY_USER: ${POSTGRES_USER:-zeal_user}
+      SPRING_FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-zeal_password}
+      # R2-17: login con el proveedor OIDC de prueba.
+      OIDC_ISSUER_URI: http://mock-oidc:8080/microsoft
+      OIDC_AUTHORIZATION_URI: http://localhost:8090/microsoft/authorize
+      OIDC_CLIENT_ID: zeal-local
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-zeal-local-secret}
+      OIDC_REDIRECT_URI: http://localhost:8080/api/auth/microsoft/callback
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ROOM_ICE_SERVERS: ${ROOM_ICE_SERVERS:-stun:stun.l.google.com:19302}
+      TURN_URLS: ${TURN_URLS:-turn:localhost:3478?transport=udp,turn:localhost:3478?transport=tcp,turns:localhost:5349?transport=tcp}
+      TURN_SECRET: ${TURN_SECRET:-ZealTurnDevSecretOnlyForLocal}
+      LIVEKIT_PUBLIC_URL: /livekit
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-zeal-dev}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-ZealLiveKitDevSecretKeyMinimum32Chars!!}
+    depends_on:
+      postgres-wellbeing: { condition: service_healthy }
+      redis-broker: { condition: service_healthy }
+      mock-oidc: { condition: service_started }
+
+  marketplace:
+    <<: *replicated
+    build: ../zeal-marketplace-service
+    image: zeal/marketplace-service:latest
+    mem_limit: 768m
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:postgresql://postgres-marketplace:5432/zeal_marketplace_db
+      # R2-27: pool más PEQUEÑO a propósito. En REND-2 todas las postulaciones compiten por la misma fila;
+      # con más conexiones solo crece la cola de bloqueos en PostgreSQL y empeora (medido: 40 → p95 > 1 min
+      # con lock_timeout; 20 → 1,5 s; 10 → 1,3 s). Ver docs/evidencias/REND.md.
+      DB_POOL_SIZE: ${MARKETPLACE_DB_POOL_SIZE:-10}
+      DB_USERNAME: ${DB_APP_USER:-zeal_app}
+      DB_PASSWORD: ${DB_APP_PASSWORD:-zeal_app_dev_password}
+      SPRING_FLYWAY_USER: ${POSTGRES_USER:-zeal_user}
+      SPRING_FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-zeal_password}
+      LIVEKIT_PUBLIC_URL: /livekit
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-zeal-dev}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-ZealLiveKitDevSecretKeyMinimum32Chars!!}
+    depends_on:
+      postgres-marketplace: { condition: service_healthy }
+      redis-broker: { condition: service_healthy }
+
+  realtime:
+    <<: *replicated
+    build: ../zeal-realtime-gateway
+    image: zeal/realtime-gateway:latest
+    mem_limit: 512m
+    environment:
+      <<: *service-env
+      WELLBEING_BASE_URL: http://wellbeing:8081
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_STOMP_PORT: "61613"
+      RABBITMQ_CLIENT_LOGIN: ${RABBITMQ_USER:-zeal}
+      RABBITMQ_CLIENT_PASSCODE: ${RABBITMQ_PASSWORD:-zeal-dev-password}
+      RABBITMQ_SYSTEM_LOGIN: ${RABBITMQ_USER:-zeal}
+      RABBITMQ_SYSTEM_PASSCODE: ${RABBITMQ_PASSWORD:-zeal-dev-password}
+    depends_on:
+      redis-broker: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      wellbeing: { condition: service_healthy }
+
+  # API Gateway / balanceador: punto de entrada único del frontend (VITE_API_BASE_URL=http://localhost:8080).
   api-gateway:
     image: nginx:1.27-alpine
     container_name: zeal-api-gateway
@@ -83,10 +261,12 @@ services:
       - "8080:8080"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
     depends_on:
-      - livekit
+      wellbeing: { condition: service_healthy }
+      marketplace: { condition: service_healthy }
+      realtime: { condition: service_healthy }
+      livekit: { condition: service_started }
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
       interval: 10s
@@ -97,3 +277,4 @@ volumes:
   postgres_wellbeing_data:
   postgres_marketplace_data:
   redis_data:
+  rabbitmq_data:

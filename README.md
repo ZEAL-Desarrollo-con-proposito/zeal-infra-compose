@@ -3,25 +3,29 @@
 Orquestación local de ZEAL: bases de datos por bounded context, broker de eventos, API Gateway y
 pruebas de sustentación de los retos de concurrencia y tiempo real.
 
+> **Guía completa (Sprint 2):** [`GUIA_PASO_A_PASO_BACKEND.md`](GUIA_PASO_A_PASO_BACKEND.md) — rutas,
+> puertos, variables de entorno, pruebas y despliegue. Multinodo: [`docs/cowork/`](docs/cowork/).
+> Evidencias: [`docs/evidencias/`](docs/evidencias/) · Contratos para FE: [`docs/contratos/`](docs/contratos/).
+
 | Componente | Puerto | Rol |
 |---|---|---|
-| `api-gateway` (NGINX) | 8080 | Punto de entrada único del frontend (`VITE_API_BASE_URL=http://localhost:8080`) |
-| `postgres-wellbeing` | 5432 | Wellbeing Domain (citas, chat: datos clínicos aislados) |
-| `postgres-marketplace` | 5433 | Business Domain (convocatorias y talleres) |
-| `redis-broker` | 6379 | Message Bus (Pub/Sub) y notificaciones |
-| `livekit` | 7881/tcp, 50000-50100/udp | SFU de las videollamadas grupales de los talleres (señalización por el gateway en `/livekit`) |
-| `zeal-wellbeing-service` | 8081 | corre en el host |
-| `zeal-marketplace-service` | 8082 | corre en el host |
-| `zeal-realtime-gateway` | 8083 | corre en el host (STOMP/SockJS en `/ws`) |
+| `api-gateway` (NGINX) | 8080 | Entrada única y balanceador (least_conn, reintento solo idempotente, afinidad SockJS) |
+| `wellbeing` ×2 · `marketplace` ×2 · `realtime` ×2 | internos 8081-8083 | Microservicios (réplicas descubiertas por DNS) |
+| `postgres-wellbeing` / `postgres-marketplace` | 5432 / 5433 | Una base por bounded context |
+| `redis-broker` | 6379 | Eventos (Pub/Sub), presencia, lista negra de tokens, caché |
+| `rabbitmq` | 61613 (STOMP), 15672 (consola, solo local) | Broker STOMP compartido por las réplicas del gateway |
+| `livekit` · `coturn` | 7881/tcp, 50000-50100/udp · 3478, 5349, 49160-49200/udp | Video (talleres y citas 1:1) y relé TURN permanente |
+| `mock-oidc` | 8090 | Proveedor OIDC de prueba (en lugar de Microsoft) |
+| monitoreo (`docker-compose.monitoring.yml`) | 3001, 9090, 9093 (solo 127.0.0.1) | Grafana, Prometheus, Alertmanager, Loki, Alloy, cAdvisor, exportadores, métricas de negocio |
 
 ## Arranque
 
 ```bash
-docker compose up -d && docker compose ps      # esperar "healthy"
-(cd ../zeal-wellbeing-service   && ./mvnw spring-boot:run)
-(cd ../zeal-marketplace-service && ./mvnw spring-boot:run)
-(cd ../zeal-realtime-gateway    && ./mvnw spring-boot:run)
+./coturn/generate-dev-cert.sh                      # una vez
+docker compose up -d --build && docker compose ps  # esperar "healthy"
 curl -s localhost:8080/gateway/health
+# Con monitoreo:
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d --build
 ```
 
 ## Enrutamiento del API Gateway
@@ -30,7 +34,7 @@ curl -s localhost:8080/gateway/health
 |---|---|
 | `/api/auth`, `/api/wellbeing`, `/api/chats`, `/api/organizacion` | wellbeing (8081) |
 | `/api/proyectos`, `/api/postulaciones`, `/api/talleres`, `/api/inscripciones`, `/api/admin` | marketplace (8082) |
-| `/api/notificaciones`, `/api/presencia`, `/ws` | realtime-gateway (8083) |
+| `/api/notificaciones`, `/api/presencia`, `/api/telemetria`, `/ws` | realtime-gateway (8083) |
 | `/livekit/` | livekit (7880, WebSocket; se quita el prefijo) |
 
 ## Pruebas de sustentación
