@@ -2,11 +2,11 @@
 # de NGINX la procesa con envsubst al arrancar (NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx) y solo reemplaza
 # las variables definidas en el entorno; las $variables propias de NGINX quedan intactas.
 #
-# Descubrimiento de réplicas (DISP-2): cada servicio se publica con un nombre del DNS privado de la VNet
-# (zona privada de Azure, p. ej. wellbeing.zeal.internal) con un registro A por nodo de servicios.
-# "resolve" vuelve a consultar el nombre cada 10 s: agregar un nodo/réplica = agregar un registro A,
-# sin recargar NGINX ni reiniciar las demás réplicas. Si no se usa DNS privado, reemplazar cada
-# "server <host>:<puerto> resolve" por una línea "server <IP privada>:<puerto>" por nodo.
+# Cada microservicio vive en su propia VM con DOS réplicas (puertos 808x y 809x). Cada servicio tiene un
+# nombre en el DNS privado de la VNet (p. ej. wellbeing.zeal.internal → IP de su VM).
+# Descubrimiento (DISP-2): "resolve" vuelve a consultar el nombre cada 10 s; agregar otra VM del mismo
+# microservicio = agregar un registro A, sin recargar NGINX ni reiniciar las demás réplicas. Si no se
+# usa DNS privado, poner la IP privada de la VM en *_HOST.
 worker_processes auto;
 
 events {
@@ -26,24 +26,28 @@ http {
         zone wellbeing 64k;
         least_conn;
         server ${WELLBEING_HOST}:8081 resolve max_fails=3 fail_timeout=10s;
+        server ${WELLBEING_HOST}:8091 resolve max_fails=3 fail_timeout=10s;
         keepalive 32;
     }
     upstream marketplace {
         zone marketplace 64k;
         least_conn;
         server ${MARKETPLACE_HOST}:8082 resolve max_fails=3 fail_timeout=10s;
+        server ${MARKETPLACE_HOST}:8092 resolve max_fails=3 fail_timeout=10s;
         keepalive 32;
     }
     upstream realtime {
         zone realtime 64k;
         least_conn;
         server ${REALTIME_HOST}:8083 resolve max_fails=3 fail_timeout=10s;
+        server ${REALTIME_HOST}:8093 resolve max_fails=3 fail_timeout=10s;
         keepalive 16;
     }
     upstream realtime_ws {
         zone realtime_ws 64k;
         hash $sockjs_session;   # DT-3: afinidad por id de sesión SockJS (ver nginx.conf)
         server ${REALTIME_HOST}:8083 resolve max_fails=3 fail_timeout=10s;
+        server ${REALTIME_HOST}:8093 resolve max_fails=3 fail_timeout=10s;
     }
     upstream livekit {
         zone livekit 64k;

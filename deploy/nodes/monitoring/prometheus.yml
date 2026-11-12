@@ -27,7 +27,7 @@ scrape_configs:
     file_sd_configs: [{ files: ["/etc/prometheus/targets/realtime.json"] }]
   - job_name: business-metrics
     metrics_path: /actuator/prometheus
-    file_sd_configs: [{ files: ["/etc/prometheus/targets/business-metrics.json"] }]
+    static_configs: [{ targets: ["business-metrics:8084"] }]
   - job_name: rabbitmq
     file_sd_configs: [{ files: ["/etc/prometheus/targets/rabbitmq.json"] }]
   - job_name: postgres

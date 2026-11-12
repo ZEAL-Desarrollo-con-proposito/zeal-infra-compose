@@ -125,7 +125,7 @@ Contratos detallados para FE: `docs/contratos/` (auth, LiveKit 1:1, telemetría,
 | `docker-compose.host-dev.yml` | Solo infraestructura; servicios en el host |
 | `docker-compose.monitoring.yml` | Monitoreo local + consumidor de métricas de negocio |
 | `docker-compose.prod.yml` + `.env.prod` | Un solo servidor (la VM de la demo) con Caddy TLS |
-| `deploy/nodes/<nodo>/docker-compose.yml` | Despliegue multinodo (borde, web, servicios ×2, datos, medios, monitoreo) |
+| `deploy/nodes/<vm>/docker-compose.yml` | Despliegue en Azure: una VM por microservicio (borde, web, wellbeing, marketplace, realtime, datos, medios, monitoreo) |
 
 ## 7. Variables de entorno por servicio
 
@@ -203,9 +203,10 @@ Evidencias y resultados: `docs/evidencias/` (DT-4, HU-DT-02, DISP, SEG, MANT, RE
 - **Un servidor** (la VM actual): `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`
   (Caddy pide el certificado; coturn y RabbitMQ ya son parte del despliegue). Completar `.env.prod`
   desde `.env.prod.example` (nuevas: `RABBITMQ_*`, `TURN_*`, `TURN_DOMAIN`, `PUBLIC_IP`).
-- **Varios nodos de Azure** (Sprint 2): `docs/cowork/RUNBOOK_DESPLIEGUE_MULTINODO.md` paso a paso
-  (borde, web, servicios ×2, datos, medios, monitoreo), con `deploy/nodes/*`, `deploy/azure/provision.sh`
-  y el pipeline `.github/workflows/deploy.yml` de cada servicio (GHCR + SSH, una réplica a la vez).
+- **Azure, una VM por microservicio** (Sprint 2): `docs/cowork/RUNBOOK_DESPLIEGUE_MULTINODO.md` paso a
+  paso (8 VMs: borde, web, wellbeing, marketplace, realtime, datos, medios, monitoreo; dos réplicas por
+  microservicio), con `deploy/nodes/*`, `deploy/azure/provision.sh` y el pipeline
+  `.github/workflows/deploy.yml` de cada servicio (GHCR + SSH, una réplica a la vez, con reversión).
 - Lo que se hace con el equipo reunido: `docs/cowork/CHECKLIST_COWORK.md`.
 
 ## 10. Problemas frecuentes
@@ -216,6 +217,7 @@ Evidencias y resultados: `docs/evidencias/` (DT-4, HU-DT-02, DISP, SEG, MANT, RE
 | `ERROR … RESOURCE_LOCKED` en RabbitMQ | Algo publica en `/queue/...` en vez de `/amq/queue/...`: ver `BrokerDestinationInterceptor` |
 | Login vuelve con `error=fallo` | `OIDC_*` mal configurado (emisor, audiencia, redirect) — el detalle está en `security_audit` y en el log `zeal.security.audit` |
 | 401 en todas las APIs tras un robo/logout | Es la lista negra (SEG-4): volver a iniciar sesión |
+| El SPA no logra iniciar sesión | El frontend debe usar `POST /api/auth/microsoft` (`docs/contratos/auth-microsoft.md`); `POST /api/auth/login` responde 404 |
 | 404 donde antes había 403 | SEG-3 (`docs/contratos/cambios-403-404.md`) |
 | Cambié `nginx/nginx.conf` y no se aplica | Está montado como archivo: `docker compose restart api-gateway` (un `sed -i` crea otro inodo) |
 | `docker kill` y la réplica no vuelve | Es una parada manual; para simular una caída usar `crash()` de `tests/disp/lib.sh` |

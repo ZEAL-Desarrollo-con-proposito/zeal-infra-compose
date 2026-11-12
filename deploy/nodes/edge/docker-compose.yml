@@ -14,6 +14,8 @@ services:
       REALTIME_HOST: ${REALTIME_HOST:?}
       LIVEKIT_HOST: ${LIVEKIT_HOST:?}
       FRONTEND_HOST: ${FRONTEND_HOST:?}
+    # Solo en la IP privada: el realtime-gateway consulta a wellbeing a través de este balanceador.
+    ports: ["${PRIVATE_IP:?}:8080:8080"]
     volumes:
       - ../../../nginx/nginx.multinode.conf.template:/etc/nginx/templates/nginx.conf.template:ro
       - ../../../nginx/conf.d:/etc/nginx/conf.d:ro

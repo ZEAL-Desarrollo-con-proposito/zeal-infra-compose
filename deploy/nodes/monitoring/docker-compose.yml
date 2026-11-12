@@ -4,6 +4,17 @@
 name: zeal-monitoring
 
 services:
+  # R2-31: consumidor de eventos de dominio → métricas de negocio. Se construye aquí desde el repo de
+  # infraestructura (no necesita registro de imágenes) y lee el Redis de la VM de datos.
+  business-metrics:
+    build: ../../../services/zeal-business-metrics
+    image: zeal/business-metrics:latest
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      REDIS_HOST: ${DATA_NODE_IP:?}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+
   prometheus:
     image: prom/prometheus:v3.5.0
     restart: unless-stopped
