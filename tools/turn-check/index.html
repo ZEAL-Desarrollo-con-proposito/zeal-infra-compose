@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZEAL · Prueba del relé TURN</title>
+  <style>
+    :root { --bg: #f7f7f5; --fg: #1d1d1b; --muted: #6b6b66; --ok: #1f7a3f; --fail: #b3261e; --card: #fff; --line: #ddd; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #161615; --fg: #ecece8; --muted: #a3a39c; --card: #22221f; --line: #3a3a36; --ok: #58c27d; --fail: #f2847b; } }
+    body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+    main { max-width: 760px; margin: 0 auto; }
+    section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 16px 0; }
+    label { display: block; margin: 8px 0 2px; color: var(--muted); font-size: 13px; }
+    input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: 13px ui-monospace, monospace; }
+    button { margin-top: 12px; padding: 8px 14px; border-radius: 6px; border: 0; background: var(--fg); color: var(--bg); cursor: pointer; }
+    pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; max-height: 240px; overflow: auto; }
+    .ok { color: var(--ok); font-weight: 600; } .fail { color: var(--fail); font-weight: 600; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Prueba del relé TURN (DT-6)</h1>
+  <p>Fuerza <code>iceTransportPolicy: "relay"</code>: si hay conexión, pasó por coturn. Las credenciales
+    temporales salen de <code>GET /api/wellbeing/reservas/{id}/sala</code> (<code>iceServers</code>) y el
+    permiso de LiveKit de <code>GET /api/wellbeing/reservas/{id}/sala/conexion</code>.</p>
+
+  <section>
+    <h2>1. Candidatos relay</h2>
+    <label for="turnUrl">URL TURN</label>
+    <input id="turnUrl" value="turn:localhost:3478?transport=udp">
+    <label for="turnUser">Usuario (vencimiento:id)</label>
+    <input id="turnUser" placeholder="1794416400:usr-empleado-001">
+    <label for="turnCredential">Credencial</label>
+    <input id="turnCredential">
+    <button id="gather">Buscar candidatos relay</button>
+    <p id="gatherResult"></p>
+    <pre id="gatherLog"></pre>
+  </section>
+
+  <section>
+    <h2>2. Sala de LiveKit de la cita forzando el relé</h2>
+    <label for="lkUrl">URL del servidor (absoluta)</label>
+    <input id="lkUrl" value="ws://localhost:8080/livekit">
+    <label for="lkToken">Token (connection.token)</label>
+    <input id="lkToken">
+    <button id="join">Entrar con relay forzado</button>
+    <p id="joinResult"></p>
+    <pre id="joinLog"></pre>
+  </section>
+</main>
+<script type="module">
+  const $ = (id) => document.getElementById(id);
+  const log = (el, line) => { $(el).textContent += line + '\n'; };
+  const verdict = (el, ok, text) => { $(el).className = ok ? 'ok' : 'fail'; $(el).textContent = text; };
+
+  $('gather').onclick = async () => {
+    $('gatherLog').textContent = '';
+    const pc = new RTCPeerConnection({
+      iceTransportPolicy: 'relay',
+      iceServers: [{ urls: $('turnUrl').value, username: $('turnUser').value, credential: $('turnCredential').value }],
+    });
+    const relays = [];
+    pc.onicecandidate = ({ candidate }) => {
+      if (!candidate) return;
+      log('gatherLog', candidate.candidate);
+      if (candidate.type === 'relay' || / typ relay /.test(candidate.candidate)) relays.push(candidate);
+    };
+    pc.createDataChannel('turn-check');
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise((resolve) => {
+      pc.onicegatheringstatechange = () => pc.iceGatheringState === 'complete' && resolve();
+      setTimeout(resolve, 8000);
+    });
+    pc.close();
+    window.turnCheckResult = { relays: relays.length };
+    verdict('gatherResult', relays.length > 0, relays.length > 0
+      ? `APROBADO: ${relays.length} candidato(s) relay asignados por coturn`
+      : 'FALLIDO: ningún candidato relay (revisa credencial vencida, URL o firewall)');
+  };
+
+  $('join').onclick = async () => {
+    $('joinLog').textContent = '';
+    const { Room, RoomEvent, LocalVideoTrack } = await import('https://cdn.jsdelivr.net/npm/livekit-client@2.22.3/dist/livekit-client.esm.mjs');
+    const room = new Room();
+    room.on(RoomEvent.ConnectionStateChanged, (state) => log('joinLog', `estado: ${state}`));
+    try {
+      await room.connect($('lkUrl').value, $('lkToken').value, { rtcConfig: { iceTransportPolicy: 'relay' } });
+      // Pista de video sintética para que haya medios que transportar.
+      const canvas = Object.assign(document.createElement('canvas'), { width: 160, height: 120 });
+      const ctx = canvas.getContext('2d');
+      setInterval(() => { ctx.fillStyle = `hsl(${Date.now() / 20 % 360} 60% 50%)`; ctx.fillRect(0, 0, 160, 120); }, 100);
+      await room.localParticipant.publishTrack(new LocalVideoTrack(canvas.captureStream(10).getVideoTracks()[0]));
+      await new Promise((r) => setTimeout(r, 4000));
+      const pc = room.engine.pcManager?.publisher?.getPC?.() ?? room.engine.publisher?.pc;
+      const stats = pc ? await pc.getStats() : new Map();
+      let candidateType = 'desconocido';
+      stats.forEach((report) => {
+        if (report.type === 'candidate-pair' && (report.selected || report.nominated) && report.state === 'succeeded') {
+          const local = stats.get(report.localCandidateId);
+          if (local) candidateType = local.candidateType;
+        }
+      });
+      log('joinLog', `par de candidatos seleccionado: local=${candidateType}`);
+      window.turnCheckResult = { ...(window.turnCheckResult ?? {}), liveKit: candidateType };
+      verdict('joinResult', candidateType === 'relay', candidateType === 'relay'
+        ? 'APROBADO: la sala conectó y el medio viaja por el relé TURN'
+        : `FALLIDO: tipo de candidato ${candidateType}`);
+    } catch (error) {
+      verdict('joinResult', false, `FALLIDO: ${error.message}`);
+    } finally {
+      setTimeout(() => room.disconnect(), 1000);
+    }
+  };
+</script>
+</body>
+</html>

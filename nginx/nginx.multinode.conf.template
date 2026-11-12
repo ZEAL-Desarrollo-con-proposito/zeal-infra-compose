@@ -1,0 +1,70 @@
+# Balanceador del nodo de BORDE en el despliegue multinodo (R2-2, R2-4). Plantilla: la imagen oficial
+# de NGINX la procesa con envsubst al arrancar (NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx) y solo reemplaza
+# las variables definidas en el entorno; las $variables propias de NGINX quedan intactas.
+#
+# Cada microservicio vive en su propia VM con DOS réplicas (puertos 808x y 809x). Cada servicio tiene un
+# nombre en el DNS privado de la VNet (p. ej. wellbeing.zeal.internal → IP de su VM).
+# Descubrimiento (DISP-2): "resolve" vuelve a consultar el nombre cada 10 s; agregar otra VM del mismo
+# microservicio = agregar un registro A, sin recargar NGINX ni reiniciar las demás réplicas. Si no se
+# usa DNS privado, poner la IP privada de la VM en *_HOST.
+worker_processes auto;
+
+events {
+    worker_connections 4096;
+}
+
+http {
+    server_tokens off;
+    resolver ${DNS_RESOLVER} valid=10s ipv6=off;   # Azure: 168.63.129.16
+    resolver_timeout 2s;
+
+    include /etc/nginx/conf.d/zeal-common.conf;
+    access_log /dev/stdout zeal_json;
+    error_log /dev/stderr warn;
+
+    upstream wellbeing {
+        zone wellbeing 64k;
+        least_conn;
+        server ${WELLBEING_HOST}:8081 resolve max_fails=3 fail_timeout=10s;
+        server ${WELLBEING_HOST}:8091 resolve max_fails=3 fail_timeout=10s;
+        keepalive 32;
+    }
+    upstream marketplace {
+        zone marketplace 64k;
+        least_conn;
+        server ${MARKETPLACE_HOST}:8082 resolve max_fails=3 fail_timeout=10s;
+        server ${MARKETPLACE_HOST}:8092 resolve max_fails=3 fail_timeout=10s;
+        keepalive 32;
+    }
+    upstream realtime {
+        zone realtime 64k;
+        least_conn;
+        server ${REALTIME_HOST}:8083 resolve max_fails=3 fail_timeout=10s;
+        server ${REALTIME_HOST}:8093 resolve max_fails=3 fail_timeout=10s;
+        keepalive 16;
+    }
+    upstream realtime_ws {
+        zone realtime_ws 64k;
+        hash $sockjs_session;   # DT-3: afinidad por id de sesión SockJS (ver nginx.conf)
+        server ${REALTIME_HOST}:8083 resolve max_fails=3 fail_timeout=10s;
+        server ${REALTIME_HOST}:8093 resolve max_fails=3 fail_timeout=10s;
+    }
+    upstream livekit {
+        zone livekit 64k;
+        server ${LIVEKIT_HOST}:7880 resolve;
+    }
+    upstream frontend {
+        zone frontend 64k;
+        server ${FRONTEND_HOST}:80 resolve max_fails=3 fail_timeout=10s;
+    }
+
+    server {
+        listen 8080;
+        include /etc/nginx/conf.d/zeal-routes.conf;
+
+        location / {
+            include /etc/nginx/conf.d/zeal-proxy-headers.inc;
+            proxy_pass http://frontend;
+        }
+    }
+}

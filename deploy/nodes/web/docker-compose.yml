@@ -1,0 +1,8 @@
+# Nodo WEB: la SPA compilada (imagen del frontend). Solo la alcanza el borde.
+name: zeal-web
+
+services:
+  frontend:
+    image: ${REGISTRY:-ghcr.io}/${GHCR_OWNER:?}/zeal-frontend-client:${FRONTEND_TAG:-latest}
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:80:80"]

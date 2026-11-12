@@ -1,0 +1,16 @@
+# Cowork: reemplazar la URL por el canal real del equipo (o un receptor de correo).
+route:
+  receiver: equipo
+  group_by: [alertname, job]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 2h
+  routes:
+    - matchers: [scenario="SEG-4"]
+      receiver: equipo
+      group_wait: 0s
+receivers:
+  - name: equipo
+    webhook_configs:
+      - url: https://REEMPLAZAR-POR-WEBHOOK-DEL-EQUIPO
+        send_resolved: true

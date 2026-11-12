@@ -1,0 +1,45 @@
+# R2-33 · Reglas de alerta. OBS-1: un componente con p95 > 1 s o > 1 % de errores durante 2 min →
+# alerta (≤ 3 min) que nombra el componente. SEG-4: reutilización de refresh token → alerta en < 1 min.
+groups:
+  - name: obs-1
+    rules:
+      - alert: LatenciaAlta
+        expr: |
+          histogram_quantile(0.95, sum by (job, le) (rate(http_server_requests_seconds_bucket{uri!~"/actuator.*"}[2m]))) > 1
+        for: 2m
+        labels: { severity: critical, scenario: OBS-1 }
+        annotations:
+          summary: "p95 > 1 s en {{ $labels.job }}"
+          description: "El p95 de {{ $labels.job }} es {{ $value | humanizeDuration }} desde hace 2 min."
+      - alert: TasaDeErroresAlta
+        expr: |
+          sum by (job) (rate(http_server_requests_seconds_count{status=~"5..", uri!~"/actuator.*"}[2m]))
+            / sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[2m])) > 0.01
+        for: 2m
+        labels: { severity: critical, scenario: OBS-1 }
+        annotations:
+          summary: "> 1 % de errores 5xx en {{ $labels.job }}"
+          description: "{{ $value | humanizePercentage }} de las peticiones de {{ $labels.job }} fallan desde hace 2 min."
+      - alert: LatenciaTiempoRealAlta
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(zeal_realtime_delivery_latency_seconds_bucket[2m]))) > 1
+        for: 2m
+        labels: { severity: warning, scenario: OBS-1 }
+        annotations:
+          summary: "p95 commit → STOMP > 1 s en realtime-gateway"
+      - alert: ReplicaCaida
+        expr: up == 0
+        for: 1m
+        labels: { severity: critical, scenario: OBS-1 }
+        annotations:
+          summary: "{{ $labels.job }} ({{ $labels.instance }}) no responde"
+  - name: seg-4
+    rules:
+      - alert: ReutilizacionDeSesion
+        # R2-15: la evaluación cada 15 s + for: 0m → la alerta sale en < 1 min.
+        expr: increase(zeal_security_refresh_reuse_total[2m]) > 0
+        for: 0m
+        labels: { severity: critical, scenario: SEG-4 }
+        annotations:
+          summary: "Reutilización de refresh token: sesión revocada por posible robo"
+          description: "{{ $value }} sesión(es) revocada(s) por reutilización en los últimos 2 min. Ver security_audit (REFRESH_REUTILIZADO)."

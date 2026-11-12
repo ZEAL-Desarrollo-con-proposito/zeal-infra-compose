@@ -1,0 +1,114 @@
+# Nodo de DATOS (R2-5): PostgreSQL (una base por bounded context), Redis y RabbitMQ con volúmenes
+# persistentes. Solo escuchan en la IP privada. Respaldo diario: deploy/scripts/backup/ (cron del nodo).
+name: zeal-data
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  postgres-wellbeing:
+    <<: *logging
+    image: postgres:15-alpine
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:5432:5432"]
+    environment:
+      POSTGRES_DB: zeal_wellbeing_db
+      POSTGRES_USER: ${WELLBEING_DB_OWNER_USER:-zeal_owner}       # Dueño del esquema: corre Flyway
+      POSTGRES_PASSWORD: ${WELLBEING_DB_OWNER_PASSWORD:?}
+      APP_DB_USER: ${WELLBEING_DB_APP_USER:-zeal_app}             # La aplicación (R2-14)
+      APP_DB_PASSWORD: ${WELLBEING_DB_APP_PASSWORD:?}
+    volumes:
+      - wellbeing_db:/var/lib/postgresql/data
+      - ../../../postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d zeal_wellbeing_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-marketplace:
+    <<: *logging
+    image: postgres:15-alpine
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:5433:5432"]
+    environment:
+      POSTGRES_DB: zeal_marketplace_db
+      POSTGRES_USER: ${MARKETPLACE_DB_OWNER_USER:-zeal_owner}
+      POSTGRES_PASSWORD: ${MARKETPLACE_DB_OWNER_PASSWORD:?}
+      APP_DB_USER: ${MARKETPLACE_DB_APP_USER:-zeal_app}
+      APP_DB_PASSWORD: ${MARKETPLACE_DB_APP_PASSWORD:?}
+    volumes:
+      - marketplace_db:/var/lib/postgresql/data
+      - ../../../postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d zeal_marketplace_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    <<: *logging
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:6379:6379"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    <<: *logging
+    image: rabbitmq:4.2.9-management-alpine
+    hostname: zeal-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "${PRIVATE_IP:?}:61613:61613"   # STOMP (nodos de servicios)
+      - "${PRIVATE_IP:?}:15692:15692"   # Métricas Prometheus (nodo de monitoreo)
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-zeal}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?}
+    volumes:
+      - ../../../rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ../../../rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-zeal.conf:ro
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_port_listener 61613"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  # R2-30 / R2-33: exportadores para Prometheus (solo IP privada; el NSG los abre al nodo de monitoreo).
+  postgres-exporter-wellbeing:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:9187:9187"]
+    environment:
+      DATA_SOURCE_NAME: postgresql://${WELLBEING_DB_OWNER_USER:-zeal_owner}:${WELLBEING_DB_OWNER_PASSWORD}@postgres-wellbeing:5432/zeal_wellbeing_db?sslmode=disable
+  postgres-exporter-marketplace:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:9188:9187"]
+    environment:
+      DATA_SOURCE_NAME: postgresql://${MARKETPLACE_DB_OWNER_USER:-zeal_owner}:${MARKETPLACE_DB_OWNER_PASSWORD}@postgres-marketplace:5432/zeal_marketplace_db?sslmode=disable
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.74.0
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:9121:9121"]
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+volumes:
+  wellbeing_db:
+  marketplace_db:
+  redis_data:
+  rabbitmq_data:

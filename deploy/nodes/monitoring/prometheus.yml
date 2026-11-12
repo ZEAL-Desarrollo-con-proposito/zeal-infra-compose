@@ -1,0 +1,38 @@
+# R2-33 · Prometheus del nodo de monitoreo (multinodo). Los objetivos viven en targets/*.json
+# (file_sd): render-targets.sh los genera desde .env con las IPs privadas de cada nodo, y Prometheus
+# los recarga solo (agregar una réplica = agregar una IP y volver a generar, sin reiniciar).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: produccion
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: wellbeing
+    metrics_path: /actuator/prometheus
+    file_sd_configs: [{ files: ["/etc/prometheus/targets/wellbeing.json"] }]
+  - job_name: marketplace
+    metrics_path: /actuator/prometheus
+    file_sd_configs: [{ files: ["/etc/prometheus/targets/marketplace.json"] }]
+  - job_name: realtime
+    metrics_path: /actuator/prometheus
+    file_sd_configs: [{ files: ["/etc/prometheus/targets/realtime.json"] }]
+  - job_name: business-metrics
+    metrics_path: /actuator/prometheus
+    static_configs: [{ targets: ["business-metrics:8084"] }]
+  - job_name: rabbitmq
+    file_sd_configs: [{ files: ["/etc/prometheus/targets/rabbitmq.json"] }]
+  - job_name: postgres
+    file_sd_configs: [{ files: ["/etc/prometheus/targets/postgres.json"] }]
+  - job_name: redis
+    file_sd_configs: [{ files: ["/etc/prometheus/targets/redis.json"] }]
+  - job_name: cadvisor
+    file_sd_configs: [{ files: ["/etc/prometheus/targets/cadvisor.json"] }]

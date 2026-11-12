@@ -1,0 +1,47 @@
+# Nodo de BORDE: única entrada desde Internet. Caddy termina TLS y pasa todo a NGINX (balanceador),
+# que reparte entre los nodos de servicios (R2-2) y publica Grafana tras el borde (R2-33).
+name: zeal-edge
+
+services:
+  api-gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    environment:
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+      DNS_RESOLVER: ${DNS_RESOLVER:-168.63.129.16}
+      WELLBEING_HOST: ${WELLBEING_HOST:?}
+      MARKETPLACE_HOST: ${MARKETPLACE_HOST:?}
+      REALTIME_HOST: ${REALTIME_HOST:?}
+      LIVEKIT_HOST: ${LIVEKIT_HOST:?}
+      FRONTEND_HOST: ${FRONTEND_HOST:?}
+    # Solo en la IP privada: el realtime-gateway consulta a wellbeing a través de este balanceador.
+    ports: ["${PRIVATE_IP:?}:8080:8080"]
+    volumes:
+      - ../../../nginx/nginx.multinode.conf.template:/etc/nginx/templates/nginx.conf.template:ro
+      - ../../../nginx/conf.d:/etc/nginx/conf.d:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?}
+      GRAFANA_UPSTREAM: ${MONITORING_NODE_IP:?}:3000
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api-gateway: { condition: service_healthy }
+
+volumes:
+  caddy_data:
+  caddy_config:
