@@ -41,6 +41,26 @@ contenido de chat. Si se necesita depurar un error, se usa el `X-Request-Id` de 
 | `413` | Cuerpo de más de 16 KB o sin `Content-Length` |
 | `429` | Más de 30 envíos por minuto de la misma persona (límite compartido entre réplicas, en Redis). Reintentar en el siguiente minuto; no reintentar en bucle |
 
+## Latencia de los avisos en vivo (`emittedAt`)
+
+Todo mensaje STOMP que publica el gateway (`/topic/...` y `/user/queue/...`, sin excepción) trae en la raíz
+**`emittedAt`**: instante ISO-8601 UTC en que el servidor lo publicó (p. ej. `"2026-11-12T16:41:47.093Z"`).
+El frontend calcula `ahora - emittedAt` al pintarlo y lo envía como evento `latencia`:
+
+```json
+{ "events": [
+  { "type": "latencia", "name": "notificacion_recibida", "valueMs": 180 },
+  { "type": "latencia", "name": "mensaje_recibido",      "valueMs": 95 }
+] }
+```
+
+- Un evento por aviso medido (o la muestra que el cliente decida), **máximo 20 por envío** y un envío cada
+  ~30 s (límite de 30 envíos/min por persona; más allá, 429).
+- Los relojes del navegador y del servidor pueden diferir: un `valueMs` negativo se descarta en el cliente
+  (el servidor rechaza valores fuera de 0–120000 con 400).
+- El histograma `{ "type": "LATENCIA_EN_VIVO", "series": [...] }` **no** es parte de este contrato: el
+  endpoint lo rechaza con 400. Se acordó adaptar el frontend a `{ "events": [...] }`.
+
 ## Qué se mide (para tableros)
 
 | Evento | Métrica Prometheus | Etiquetas |

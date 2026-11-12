@@ -1,7 +1,7 @@
 # Evidencia SEG · Seguridad (HU-BE-21, HU-BE-22) — SEG-2, SEG-3, SEG-4
 
-> Escenarios aprobados: **SEG-2** (autenticación), **SEG-3** (autorización sobre recursos ajenos) y
-> **SEG-4** (una sola sesión válida por cookie de renovación). SEG-1 y SEG-5 quedan fuera.
+> Escenarios aprobados: **SEG-1** (fuerza bruta, agregado después), **SEG-2** (autenticación), **SEG-3**
+> (autorización sobre recursos ajenos) y **SEG-4** (una sola sesión válida por cookie de renovación). SEG-5 queda fuera.
 > Ensayo local (2026-11-11) con `docker-compose.yml`: 2 réplicas por servicio, proveedor OIDC de prueba
 > (mock-oauth2-server) en lugar de Microsoft Entra ID. Ejecución oficial sobre el despliegue
 > distribuido: ver `docs/cowork/CHECKLIST_COWORK.md`.
@@ -17,6 +17,34 @@
 | R2-8 / R2-10 SEG-3 | `SecurityConfig`, `JsonSecurityErrorHandler`, `GlobalExceptionHandler`; consultas filtradas por dueño | Todo acceso denegado → 404 + auditoría. Se movió el filtro de dueño/empresa a la consulta en: sala de la cita (`findForParticipant`), activar sala (`findOfPsychologistForUpdate`), tomar cupo liberado (`findOfferedToForUpdate`), sala del taller (`findByIdAndOrganization`) |
 | R2-9 STOMP | `StompSubscriptionGuard`, `StompAuthenticationInterceptor`, `GatewaySecurityAudit` | Token validado en CONNECT (incluida la lista negra); SUBSCRIBE a colas de otro usuario o tópicos de otra empresa rechazado y auditado |
 | R2-15 Alerta SEG-4 | Métrica `zeal_security_refresh_reuse_total` (`SessionService`) + regla en `monitoring/prometheus/alerts.yml` | Ver Bloque 5 / `OBS.md` |
+
+## SEG-1 · Fuerza bruta (HU-BE-20, ADR-15) — bloqueo en el borde
+
+El bloqueo lo hace el **borde** (NGINX + CrowdSec), no el backend ni el front. Con el login de Microsoft ya
+no existe `/api/auth/login`: se protege `POST /api/auth/microsoft` y `GET /api/auth/microsoft/callback`.
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| IP real del cliente | `nginx/conf.d/zeal-common.conf` (`set_real_ip_from` + `real_ip_header X-Forwarded-For`) | Detrás de Caddy `$remote_addr` sería la del proxy: se confía en `X-Forwarded-For` solo desde redes privadas (Caddy descarta el que traiga un cliente de Internet). Todo lo de abajo usa esta IP |
+| Límite por IP | `limit_req_zone zeal_auth` (60 por minuto, ráfaga de 20, `nodelay`) en los dos endpoints | Una IP puede iniciar ~30 sesiones por minuto (un login son 2 peticiones; margen para una empresa tras un NAT) |
+| 429, no 503 | `limit_req_status 429` + `error_page 429 = @rate_limited` | Cuerpo JSON y cabecera `Retry-After: 60` (sin ella el front espera 60 s por su cuenta) |
+| Detección | `crowdsec/` (parser `zeal/nginx-json`, escenario `zeal/auth-bruteforce`) | Cuenta como fallo un 429 en `/api/auth/` **o** un callback que redirige a `/login?error=…` (`cuenta_no_registrada`, `fallo`, `cancelado`); el log JSON de NGINX trae `remoteAddr` y `location` (`$sent_http_location`). Más de 10 fallos (goteo de 1 cada 30 s) → alerta → bloqueo de 30 min (`crowdsec/profiles.yaml`) |
+| Aplicación del bloqueo | `nginx/crowdsec-bouncer.sh` (sin módulos Lua) | Cada 5 s lee las decisiones de la API local de CrowdSec y, si cambiaron, regenera la lista de IP y recarga NGINX (sin cortar conexiones) |
+| Alcance | `if ($crowdsec_deny_api)` en `zeal-routes.conf` | **Solo `/api/`**: responde 403 JSON con `Retry-After: 300`; el SPA sigue cargando y puede mostrar "acceso bloqueado desde esta red" |
+
+Prueba (tarea 437), `tests/security/seg1-bruteforce.sh`, contra el entorno local (`docker compose up -d`):
+
+```
+```
+
+Las IP de los "clientes" se simulan con `X-Forwarded-For` (documentación de rangos TEST-NET: no son IP reales).
+Para levantar un bloqueo a mano: `docker exec zeal-crowdsec cscli decisions delete --ip <ip>`.
+
+**Límites conocidos:** (1) empresas detrás de un mismo NAT comparten contador: si fallan 10 inicios de
+sesión en pocos minutos todo el NAT queda bloqueado 30 min (ajustable en `profiles.yaml` y `zeal_auth`);
+(2) CrowdSec local corre sin su red de inteligencia colectiva (`DISABLE_ONLINE_API`); en producción se
+puede enrolar (cowork); (3) la API de CrowdSec y la lista de IP viven en el borde: con un solo nodo de borde
+no hay conmutación — es el mismo punto único que Caddy.
 
 ## SEG-2 · Autenticación (R2-11)
 

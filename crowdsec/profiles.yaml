@@ -1,0 +1,9 @@
+# SEG-1 · Qué hacer con una alerta: bloquear la IP durante 30 minutos (el borde responde 403 a /api/).
+# Para levantar un bloqueo a mano: docker exec zeal-crowdsec cscli decisions delete --ip <ip>
+name: zeal_ip_ban
+filters:
+  - Alert.Remediation == true && Alert.GetScope() == "Ip"
+decisions:
+  - type: ban
+    duration: 30m
+on_success: break

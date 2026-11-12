@@ -1,0 +1,8 @@
+# SEG-1 · CrowdSec lee los logs JSON del balanceador NGINX directamente del demonio de Docker.
+# (container_name_regexp: sirve igual con el nombre fijo del entorno local y con el que genera Compose
+# en el nodo de borde.)
+source: docker
+container_name_regexp:
+  - ".*api-gateway.*"
+labels:
+  type: zeal-nginx

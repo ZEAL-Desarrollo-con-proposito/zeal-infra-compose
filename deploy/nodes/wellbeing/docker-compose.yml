@@ -1,10 +1,10 @@
-# VM de WELLBEING — una máquina virtual dedicada a este microservicio, con DOS réplicas
-# (wellbeing-a en 8081 y wellbeing-b en 8091). El NGINX del borde reparte entre ambas y, si se agrega otra VM
-# de wellbeing (otro registro A en zeal.internal), también entre máquinas.
-# Despliegue: deploy/scripts/deploy-service.sh actualiza una réplica, espera su readiness y luego la otra.
+# VM de WELLBEING (principal o respaldo). El MISMO archivo se usa en las dos VMs de este microservicio
+# (<wellbeing>-1 y <wellbeing>-2), cada una con su .env; el balanceador del borde reparte entre ambas y, si una VM se
+# apaga o se cae, todo el tráfico pasa a la otra sin intervención. Una réplica por VM.
+# Despliegue: deploy/scripts/deploy-service.sh actualiza una VM, espera su readiness y recién entonces la otra.
 name: zeal-wellbeing
 
-x-replica: &replica
+x-service: &service
   image: ${REGISTRY:-ghcr.io}/${GHCR_OWNER:?}/zeal-wellbeing-service:${IMAGE_TAG:-latest}
   restart: unless-stopped
   stop_grace_period: 30s
@@ -12,7 +12,7 @@ x-replica: &replica
   logging:
     driver: json-file
     options: { max-size: "20m", max-file: "5" }
-  environment: &env
+  environment:
     REDIS_HOST: ${DATA_NODE_IP:?}
     REDIS_PORT: "6379"
     REDIS_PASSWORD: ${REDIS_PASSWORD:?}
@@ -20,6 +20,7 @@ x-replica: &replica
     JWT_ISSUER: zeal
     APP_TIME_ZONE: America/Bogota
     CORS_ALLOWED_ORIGINS: ${PUBLIC_URL:?}
+    NODE_NAME: ${NODE_NAME:?Define NODE_NAME (p. ej. wellbeing-1 o wellbeing-2)}
     DB_URL: jdbc:postgresql://${DATA_NODE_IP}:5432/zeal_wellbeing_db
     # R2-14: la app usa el rol limitado; Flyway corre con el propietario.
     DB_USERNAME: ${DB_APP_USER:-zeal_app}
@@ -40,10 +41,6 @@ x-replica: &replica
     FRONTEND_URL: ${PUBLIC_URL}
 
 services:
-  wellbeing-a:
-    <<: *replica
+  wellbeing:
+    <<: *service
     ports: ["${PRIVATE_IP:?}:8081:8081"]
-
-  wellbeing-b:
-    <<: *replica
-    ports: ["${PRIVATE_IP:?}:8091:8081"]

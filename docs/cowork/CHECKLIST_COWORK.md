@@ -5,7 +5,7 @@ implementado y probado (ver `docs/evidencias/`). Orden sugerido: el del `RUNBOOK
 
 | ✔ | Tarea | Origen | Qué hacer | Hecho cuando… |
 |---|---|---|---|---|
-| ☐ | Red, subredes, NSG, VMs, DNS privado | R2-4 | Revisar y ejecutar `deploy/azure/provision.sh` | 8 VMs (una por microservicio), solo borde y medios con IP pública; `zeal.internal` con los registros A |
+| ☐ | Red, subredes, NSG, VMs, DNS privado | R2-4 | Revisar y ejecutar `deploy/azure/provision.sh` | 12 VMs repartidas en las 4 cuentas (microservicios y front en dos VMs), IP públicas anotadas en `peers.env`, reglas de NSG aplicadas |
 | ☐ | DNS público | R2-4, DT-5 | `zeal.<dominio>` → borde, `turn.<dominio>` → medios | `dig` resuelve ambos |
 | ☐ | Docker y repo en cada nodo | R2-4 | Paso 2 del runbook | `docker compose version` en las 8 VMs |
 | ☐ | Nodo de datos | R2-5 | Paso 3 | PostgreSQL ×2, Redis y RabbitMQ *healthy*; roles `zeal_owner`/`zeal_app` |
@@ -17,8 +17,8 @@ implementado y probado (ver `docs/evidencias/`). Orden sugerido: el del `RUNBOOK
 | ☐ | Relé forzado desde red sin UDP | DT-6 | `turn-check.sh` (TCP/TLS) y `tools/turn-check/index.html` (candidatos relay y sala de LiveKit con `iceTransportPolicy: relay`) | Candidatos `relay` y videollamada 1:1 conectada solo por el relé |
 | ☐ | Videollamada 1:1 por LiveKit en el SPA | DT-8 | Probar con el PR de FE desplegado | Empleado y psicólogo se ven y se oyen; chat y salida funcionan |
 | ☐ | Frontend con login de Microsoft | R2-17 | Fusionar en el repo de FE el flujo de `docs/contratos/auth-microsoft.md` (el `main` actual usa `POST /api/auth/login`, ya retirado) | Se puede iniciar sesión desde el SPA |
-| ☐ | Una VM por microservicio | R2-4 | Paso 6 (wellbeing, marketplace, realtime; dos réplicas en cada una) | Las 6 réplicas *ready* (808x y 809x) |
-| ☐ | Segunda VM por microservicio (opcional) | R2-4, DISP | Paso 12 del runbook, si se exige tolerar la caída de una VM completa | El servicio sigue atendiendo con una VM apagada |
+| ☐ | Dos VMs por microservicio | R2-4 | Paso 6 (wellbeing, marketplace, realtime: VM 1 y VM 2) | Las 6 VMs *ready* (8081, 8082, 8083) |
+| ☐ | Apagar una VM de servicio o del front (la prueba de la evaluación) | R2-4, DISP-1 | Paso 11 del runbook, con carga ligera | Sin errores visibles; todo el tráfico en la otra VM; al encender la apagada vuelve sola |
 | ☐ | Nodos web y borde | R2-4 | Paso 7 | `https://zeal.<dominio>/gateway/health` → UP; `/actuator/*` → 404 |
 | ☐ | Balanceo entre nodos | R2-2 | 10 peticiones y mirar `upstream` en el log de NGINX | Tráfico en los puertos 808x y 809x de la VM de cada microservicio |
 | ☐ | Registrar la app en Entra ID | R2-17 | Paso 9 (redirect de producción, secreto, claim `email`) | Login de una cuenta precargada entra; una no precargada vuelve con `cuenta_no_registrada` |
@@ -42,3 +42,9 @@ implementado y probado (ver `docs/evidencias/`). Orden sugerido: el del `RUNBOOK
 | ☐ | Alertas OBS-1 y SEG-4 en producción | R2-33 | Provocar ambas (base detenida con carga; refresh reutilizado) | Alerta en ≤ 3 min / < 1 min en el canal real, nombrando el componente |
 | ☐ | Datos de demostración | — | `DEMO_DATA_ENABLED=false` en producción; cargar las cuentas reales por empresa | Ninguna cuenta semilla en producción |
 | ☐ | Repositorio del consumidor de métricas | R2-31 | Decidir si `services/zeal-business-metrics` pasa a su propio repo (hoy vive en infra) y su pipeline a GHCR | Corre en la VM de monitoreo (se construye allí desde el repo de infraestructura) |
+| ☐ | CrowdSec en el borde (SEG-1) | HU-BE-20 | `CROWDSEC_BOUNCER_KEY` en el `.env` del borde; `cscli bouncers list` muestra a `nginx` | El bouncer consulta cada pocos segundos |
+| ☐ | IP real del cliente detrás de Caddy | HU-BE-20 | `jq .remoteAddr` del log de NGINX con una petición desde fuera | Es la IP del cliente, no la de Caddy ni 172.x |
+| ☐ | Prueba de fuerza bruta en el despliegue real (tarea 437) | HU-BE-20 | `tests/security/seg1-bruteforce.sh` adaptado (`ZEAL_API=https://zeal.<dominio>`; el `X-Forwarded-For` simulado no funciona desde Internet: usar dos máquinas/redes distintas) | Una IP con 100 intentos/min queda con 429 y luego 403; otra IP entra normal; la alerta aparece en `cscli alerts list` |
+| ☐ | Enrolar CrowdSec (opcional) | ADR-15 | Quitar `DISABLE_ONLINE_API` y `cscli console enroll` con la cuenta del equipo | Comparte y recibe listas de IP maliciosas |
+| ☐ | Variante de 4 cuentas | R2-4 | Sección "Variante: 4 cuentas" del runbook: `provision-account.sh`, `peers.env`, `.env` con IP públicas | Las 8 VMs se ven entre sí solo por los puertos de cada regla |
+

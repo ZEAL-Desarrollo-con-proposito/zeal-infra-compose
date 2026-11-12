@@ -1,4 +1,6 @@
-# Nodo WEB: la SPA compilada (imagen del frontend). Solo la alcanza el borde.
+# Nodo WEB (web-1 y web-2, el MISMO archivo en las dos VMs): la SPA compilada (imagen que publica el repo del
+# frontend). Solo la alcanza el borde, que reparte entre las dos y manda todo a la otra si una se apaga.
+# Actualizar el front: `docker compose pull && docker compose up -d` primero en web-1 y luego en web-2.
 name: zeal-web
 
 services:

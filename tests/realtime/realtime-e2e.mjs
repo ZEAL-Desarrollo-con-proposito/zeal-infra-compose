@@ -46,7 +46,8 @@ await sleep(400);
 // RT-2: reserva → notificación privada + broadcast de franjas
 const today = new Date().toISOString().slice(0, 10), later = new Date(Date.now() + 9 * 864e5).toISOString().slice(0, 10);
 const slots = (await http('GET', `${WB}/api/wellbeing/psicologos/usr-psicologo-002/franjas?desde=${today}&hasta=${later}`, david.accessToken)).body;
-const free = slots.find((s) => s.status === 'DISPONIBLE');
+// Una franja libre a más de un día: la cita demo de "dentro de 5 minutos" ocupa a David y se cruzaría con la primera libre.
+const free = slots.find((s) => s.status === 'DISPONIBLE' && Date.parse(s.startsAt) > Date.now() + 864e5);
 const booked = await http('POST', `${WB}/api/wellbeing/reservas`, david.accessToken, { slotId: free.id });
 check('reserva 201', booked.status === 201);
 check('RT-2 notificación privada a David', !!(await waitFor(D.inbox, (m) => m.d.endsWith('notificaciones') && m.body.type === 'NUEVA')));

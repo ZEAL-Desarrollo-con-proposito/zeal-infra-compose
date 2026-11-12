@@ -1,12 +1,13 @@
-# Balanceador del nodo de BORDE en el despliegue multinodo (R2-2, R2-4). Plantilla: la imagen oficial
-# de NGINX la procesa con envsubst al arrancar (NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx) y solo reemplaza
-# las variables definidas en el entorno; las $variables propias de NGINX quedan intactas.
+# Balanceador del nodo de BORDE (R2-2, R2-4). Plantilla: la imagen oficial de NGINX la procesa con envsubst
+# al arrancar (NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx) y solo reemplaza las variables definidas en el entorno.
 #
-# Cada microservicio vive en su propia VM con DOS réplicas (puertos 808x y 809x). Cada servicio tiene un
-# nombre en el DNS privado de la VNet (p. ej. wellbeing.zeal.internal → IP de su VM).
-# Descubrimiento (DISP-2): "resolve" vuelve a consultar el nombre cada 10 s; agregar otra VM del mismo
-# microservicio = agregar un registro A, sin recargar NGINX ni reiniciar las demás réplicas. Si no se
-# usa DNS privado, poner la IP privada de la VM en *_HOST.
+# Cada microservicio (wellbeing, marketplace, realtime) y el frontend viven en DOS máquinas virtuales
+# distintas: la 1 y la 2. El balanceador reparte con least_conn entre las dos y, si una VM se apaga o deja
+# de responder, la saca de la rotación (max_fails/fail_timeout) y manda todo a la otra, sin intervención.
+#   · UPSTREAM_2_FLAG vacío   → las dos reciben tráfico (activo-activo: reparte carga y tolera la caída).
+#   · UPSTREAM_2_FLAG=backup  → la VM 2 es un respaldo estricto: solo recibe tráfico si la 1 falla
+#                               (excepto los WebSockets, que usan hash y NGINX no admite backup con hash).
+# *_1_HOST y *_2_HOST son la IP (o el nombre DNS) de cada VM, sin puerto.
 worker_processes auto;
 
 events {
@@ -15,9 +16,7 @@ events {
 
 http {
     server_tokens off;
-    resolver ${DNS_RESOLVER} valid=10s ipv6=off;   # Azure: 168.63.129.16
-    resolver_timeout 2s;
-
+    
     include /etc/nginx/conf.d/zeal-common.conf;
     access_log /dev/stdout zeal_json;
     error_log /dev/stderr warn;
@@ -25,37 +24,41 @@ http {
     upstream wellbeing {
         zone wellbeing 64k;
         least_conn;
-        server ${WELLBEING_HOST}:8081 resolve max_fails=3 fail_timeout=10s;
-        server ${WELLBEING_HOST}:8091 resolve max_fails=3 fail_timeout=10s;
+        server ${WELLBEING_1_HOST}:8081 max_fails=3 fail_timeout=10s;
+        server ${WELLBEING_2_HOST}:8081 max_fails=3 fail_timeout=10s ${UPSTREAM_2_FLAG};
         keepalive 32;
     }
     upstream marketplace {
         zone marketplace 64k;
         least_conn;
-        server ${MARKETPLACE_HOST}:8082 resolve max_fails=3 fail_timeout=10s;
-        server ${MARKETPLACE_HOST}:8092 resolve max_fails=3 fail_timeout=10s;
+        server ${MARKETPLACE_1_HOST}:8082 max_fails=3 fail_timeout=10s;
+        server ${MARKETPLACE_2_HOST}:8082 max_fails=3 fail_timeout=10s ${UPSTREAM_2_FLAG};
         keepalive 32;
     }
     upstream realtime {
         zone realtime 64k;
         least_conn;
-        server ${REALTIME_HOST}:8083 resolve max_fails=3 fail_timeout=10s;
-        server ${REALTIME_HOST}:8093 resolve max_fails=3 fail_timeout=10s;
+        server ${REALTIME_1_HOST}:8083 max_fails=3 fail_timeout=10s;
+        server ${REALTIME_2_HOST}:8083 max_fails=3 fail_timeout=10s ${UPSTREAM_2_FLAG};
         keepalive 16;
     }
     upstream realtime_ws {
         zone realtime_ws 64k;
         hash $sockjs_session;   # DT-3: afinidad por id de sesión SockJS (ver nginx.conf)
-        server ${REALTIME_HOST}:8083 resolve max_fails=3 fail_timeout=10s;
-        server ${REALTIME_HOST}:8093 resolve max_fails=3 fail_timeout=10s;
+        server ${REALTIME_1_HOST}:8083 max_fails=3 fail_timeout=10s;
+        # Sin ${UPSTREAM_2_FLAG}: NGINX no admite "backup" con "hash". Las sesiones de WebSocket/SockJS se reparten por
+        # id de sesión entre las dos VMs aunque el resto esté en modo respaldo; si una VM cae, sus sesiones pasan
+        # a la otra y el navegador reconecta solo.
+        server ${REALTIME_2_HOST}:8083 max_fails=3 fail_timeout=10s;
     }
     upstream livekit {
         zone livekit 64k;
-        server ${LIVEKIT_HOST}:7880 resolve;
+        server ${LIVEKIT_HOST}:7880;
     }
     upstream frontend {
         zone frontend 64k;
-        server ${FRONTEND_HOST}:80 resolve max_fails=3 fail_timeout=10s;
+        server ${FRONTEND_1_HOST}:80 max_fails=3 fail_timeout=10s;
+        server ${FRONTEND_2_HOST}:80 max_fails=3 fail_timeout=10s ${UPSTREAM_2_FLAG};
     }
 
     server {
