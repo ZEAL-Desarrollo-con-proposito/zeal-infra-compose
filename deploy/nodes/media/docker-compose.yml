@@ -25,7 +25,7 @@ services:
               secret: "${TURN_SECRET:?}"
               ttl: 7200
             - host: ${TURN_DOMAIN}
-              port: 443
+              port: ${TURN_TLS_PORT:-443}
               protocol: tls
               secret: "${TURN_SECRET}"
               ttl: 7200
@@ -37,7 +37,7 @@ services:
     image: coturn/coturn:4.7
     restart: unless-stopped
     network_mode: host
-    cap_add: [NET_BIND_SERVICE]   # TLS en 443 con el usuario sin privilegios de la imagen
+    cap_add: [NET_BIND_SERVICE]   # TLS en un puerto < 1024 (443) con el usuario sin privilegios de la imagen
     volumes:
       - ${TURN_CERT_DIR:?}:/etc/coturn/certs:ro
     command:
@@ -48,7 +48,7 @@ services:
       - --static-auth-secret=${TURN_SECRET}
       - --realm=zeal
       - --listening-port=3478
-      - --tls-listening-port=443
+      - --tls-listening-port=${TURN_TLS_PORT:-443}
       - --cert=/etc/coturn/certs/turn.crt
       - --pkey=/etc/coturn/certs/turn.key
       - --min-port=49160

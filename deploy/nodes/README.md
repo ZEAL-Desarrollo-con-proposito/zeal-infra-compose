@@ -25,3 +25,7 @@ una VM se ensayó en local con `tests/disp/vm-failover.sh`.
 
 Los puertos de cada VM se publican solo en su IP privada (`${PRIVATE_IP}:puerto:puerto`), nunca en `0.0.0.0`;
 Azure traduce la IP pública a esa privada.
+
+> **Alternativa de dos máquinas:** si no hay 12 VMs, `deploy/duo/` despliega todo en dos máquinas (A y B), cada una con su
+> balanceador y con copia de los servicios de la otra, más réplica de las bases de datos. Ver
+> `docs/cowork/RUNBOOK_DESPLIEGUE_DUO.md`.
