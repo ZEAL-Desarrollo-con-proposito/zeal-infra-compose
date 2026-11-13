@@ -47,6 +47,7 @@ tests/security/node_modules
 
 # IP públicas de las VMs (variante de varias cuentas de Azure)
 deploy/azure/peers.env
+deploy/azure/peers-duo.env
 
 # Archivos que se crean en cada VM al desplegar (nunca van al repo)
 agent.env

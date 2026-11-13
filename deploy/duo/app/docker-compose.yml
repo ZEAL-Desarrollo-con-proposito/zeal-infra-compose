@@ -1,0 +1,169 @@
+# Despliegue en DOS MÁQUINAS · capa de APLICACIÓN. El MISMO archivo corre en la máquina A y en la B (cada una con
+# su .env): las dos llevan wellbeing, marketplace, realtime, el front, su propio balanceador (NGINX) y el borde
+# (CrowdSec + Caddy). El NGINX de cada máquina reparte entre sus servicios locales y los de la otra máquina:
+# si una máquina se apaga o falla, la otra recibe todo el tráfico sin intervención.
+#
+#   · Local primero / par después: *_1_HOST = esta máquina, *_2_HOST = la otra (PEER_IP).
+#   · UPSTREAM_2_FLAG vacío = reparto activo-activo; "backup" = la otra máquina solo entra cuando falla ésta.
+#
+# Se ejecuta desde el repo de infraestructura (los volúmenes usan rutas relativas a deploy/duo/app).
+name: zeal-app
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+x-java: &java
+  <<: *logging
+  restart: unless-stopped
+  stop_grace_period: 30s
+  mem_limit: ${REPLICA_MEM:-768m}
+
+x-common-env: &common-env
+  REDIS_HOST: ${DATA_HOST:?}
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+  JWT_SECRET: ${JWT_SECRET:?}
+  JWT_ISSUER: zeal
+  APP_TIME_ZONE: America/Bogota
+  CORS_ALLOWED_ORIGINS: ${PUBLIC_URL:?}
+
+services:
+  wellbeing:
+    <<: *java
+    image: ${REGISTRY:-ghcr.io}/${GHCR_OWNER:?}/zeal-wellbeing-service:${WELLBEING_TAG:-latest}
+    ports: ["${PRIVATE_IP:?}:8081:8081"]
+    environment:
+      <<: *common-env
+      NODE_NAME: wellbeing-${MACHINE:?Define MACHINE (a o b)}
+      DB_URL: jdbc:postgresql://${DATA_HOST}:5432/zeal_wellbeing_db
+      DB_USERNAME: ${WELLBEING_DB_APP_USER:-zeal_app}
+      DB_PASSWORD: ${WELLBEING_DB_APP_PASSWORD:?}
+      SPRING_FLYWAY_USER: ${WELLBEING_DB_OWNER_USER:-zeal_owner}
+      SPRING_FLYWAY_PASSWORD: ${WELLBEING_DB_OWNER_PASSWORD:?}
+      DEMO_DATA_ENABLED: ${DEMO_DATA_ENABLED:-false}
+      ROOM_ICE_SERVERS: stun:stun.l.google.com:19302
+      TURN_URLS: ${TURN_URLS:?}
+      TURN_SECRET: ${TURN_SECRET:?}
+      LIVEKIT_PUBLIC_URL: /livekit
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?}
+      OIDC_ISSUER_URI: ${OIDC_ISSUER_URI:?}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?}
+      OIDC_REDIRECT_URI: ${PUBLIC_URL}/api/auth/microsoft/callback
+      FRONTEND_URL: ${PUBLIC_URL}
+
+  marketplace:
+    <<: *java
+    image: ${REGISTRY:-ghcr.io}/${GHCR_OWNER:?}/zeal-marketplace-service:${MARKETPLACE_TAG:-latest}
+    ports: ["${PRIVATE_IP:?}:8082:8082"]
+    environment:
+      <<: *common-env
+      NODE_NAME: marketplace-${MACHINE}
+      DB_URL: jdbc:postgresql://${DATA_HOST}:5433/zeal_marketplace_db
+      DB_USERNAME: ${MARKETPLACE_DB_APP_USER:-zeal_app}
+      DB_PASSWORD: ${MARKETPLACE_DB_APP_PASSWORD:?}
+      SPRING_FLYWAY_USER: ${MARKETPLACE_DB_OWNER_USER:-zeal_owner}
+      SPRING_FLYWAY_PASSWORD: ${MARKETPLACE_DB_OWNER_PASSWORD:?}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}   # ver docs/evidencias/REND.md
+      DEMO_DATA_ENABLED: ${DEMO_DATA_ENABLED:-false}
+      LIVEKIT_PUBLIC_URL: /livekit
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?}
+
+  realtime:
+    <<: *java
+    image: ${REGISTRY:-ghcr.io}/${GHCR_OWNER:?}/zeal-realtime-gateway:${REALTIME_TAG:-latest}
+    ports: ["${PRIVATE_IP:?}:8083:8083"]
+    environment:
+      <<: *common-env
+      NODE_NAME: realtime-${MACHINE}
+      # Autoriza salas y chats preguntando a wellbeing A TRAVÉS del NGINX de esta máquina: reparte entre las
+      # dos máquinas y tolera que una caiga.
+      WELLBEING_BASE_URL: http://${PRIVATE_IP}:8080
+      RABBITMQ_HOST: ${DATA_HOST}
+      RABBITMQ_STOMP_PORT: "61613"
+      RABBITMQ_CLIENT_LOGIN: ${RABBITMQ_USER:-zeal}
+      RABBITMQ_CLIENT_PASSCODE: ${RABBITMQ_PASSWORD:?}
+      RABBITMQ_SYSTEM_LOGIN: ${RABBITMQ_USER:-zeal}
+      RABBITMQ_SYSTEM_PASSCODE: ${RABBITMQ_PASSWORD:?}
+
+  # El front se publica en el 3080: el 80 de la máquina lo usa Caddy (HTTPS automático).
+  frontend:
+    <<: *logging
+    image: ${REGISTRY:-ghcr.io}/${GHCR_OWNER:?}/zeal-frontend-client:${FRONTEND_TAG:-latest}
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:3080:80"]
+
+  # Balanceador de ESTA máquina: reparte entre los servicios locales y los de la otra máquina (PEER_IP).
+  api-gateway:
+    <<: *logging
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    environment:
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+      WELLBEING_1_HOST: ${PRIVATE_IP}
+      WELLBEING_2_HOST: ${PEER_IP:?Define PEER_IP (IP de la otra máquina)}
+      MARKETPLACE_1_HOST: ${PRIVATE_IP}
+      MARKETPLACE_2_HOST: ${PEER_IP}
+      REALTIME_1_HOST: ${PRIVATE_IP}
+      REALTIME_2_HOST: ${PEER_IP}
+      FRONTEND_1_HOST: ${PRIVATE_IP}
+      FRONTEND_2_HOST: ${PEER_IP}
+      FRONTEND_PORT: "3080"
+      LIVEKIT_HOST: ${MEDIA_HOST:?}
+      UPSTREAM_2_FLAG: ${UPSTREAM_2_FLAG:-}
+      CROWDSEC_LAPI_URL: http://crowdsec:8080
+      CROWDSEC_BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:?}
+    # La otra máquina también lo usa si hiciera falta (realtime → wellbeing): solo en la IP privada.
+    ports: ["${PRIVATE_IP}:8080:8080"]
+    volumes:
+      - ../../../nginx/nginx.multinode.conf.template:/etc/nginx/templates/nginx.conf.template:ro
+      - ../../../nginx/conf.d:/etc/nginx/conf.d:ro
+      - ../../../nginx/crowdsec-bouncer.sh:/docker-entrypoint.d/40-crowdsec-bouncer.sh:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # SEG-1: CrowdSec lee los logs de este NGINX y decide el bloqueo (cada máquina decide sobre su tráfico).
+  crowdsec:
+    <<: *logging
+    image: crowdsecurity/crowdsec:v1.7.0
+    restart: unless-stopped
+    environment:
+      DISABLE_ONLINE_API: "true"
+      BOUNCER_KEY_nginx: ${CROWDSEC_BOUNCER_KEY:?}
+    volumes:
+      - ../../../crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ../../../crowdsec/parsers/zeal-nginx-json.yaml:/etc/crowdsec/parsers/s01-parse/zeal-nginx-json.yaml:ro
+      - ../../../crowdsec/scenarios/zeal-auth-bruteforce.yaml:/etc/crowdsec/scenarios/zeal-auth-bruteforce.yaml:ro
+      - ../../../crowdsec/profiles.yaml:/etc/crowdsec/profiles.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - crowdsec_data:/var/lib/crowdsec/data
+
+  caddy:
+    <<: *logging
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?}
+      GRAFANA_UPSTREAM: ${MONITORING_HOST:?}:3000
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ../../nodes/edge/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api-gateway: { condition: service_healthy }
+
+volumes:
+  crowdsec_data:
+  caddy_data:
+  caddy_config:
