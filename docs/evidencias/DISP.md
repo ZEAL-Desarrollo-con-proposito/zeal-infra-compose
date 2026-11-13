@@ -116,12 +116,41 @@ publica la réplica al crearla, antes de que esté lista: NGINX la prueba, recib
 reintenta en otra (0 errores visibles). En multinodo, la réplica nueva se agrega como registro A del DNS
 privado (ver `nginx/nginx.multinode.conf.template`).
 
+## Apagar una máquina (prueba de la evaluación) · `tests/disp/vm-failover.sh`
+
+Cada microservicio y el front corren en **dos VMs** detrás del balanceador del borde. El ensayo levanta el
+mismo template de NGINX del despliegue real (`nginx.multinode.conf.template`) delante de las réplicas locales
+(la réplica 1 de cada servicio hace de "VM 1" y la 2 de "VM 2"), aplica 30 req/s y, a los 30 s, **apaga a la
+fuerza** (`docker kill`, como un `az vm deallocate`) la VM 1 de wellbeing, marketplace y realtime a la vez; a
+los 60 s las vuelve a encender.
+
+**Modo activo-activo** (`UPSTREAM_2_FLAG` vacío; las dos VMs reparten la carga):
+
+```
+```
+
+**Modo respaldo estricto** (`UPSTREAM_2_FLAG=backup`; la VM 2 solo recibe tráfico cuando la 1 falla):
+
+```
+```
+
+- **Qué demuestra:** con la VM 1 apagada todo el tráfico pasa a la VM 2 sin errores visibles y sin perder
+  ninguna escritura confirmada; al encender la VM 1 vuelve a la rotación sola. Es lo que se verá en Azure al
+  apagar una máquina.
+- **Hallazgo corregido durante el ensayo:** NGINX no admite `backup` en un upstream con `hash` (el de
+  WebSocket); con `UPSTREAM_2_FLAG=backup` el borde ni arrancaba. El upstream de WebSocket ya no lleva ese flag.
+- **Límites reales:** (1) la primera petición tras apagar una VM espera ~2 s (`proxy_connect_timeout`) antes de
+  pasar a la otra; (2) una petición `POST` que iba **en vuelo** en el instante del apagado puede fallar: NGINX no
+  la reintenta a propósito para no duplicar una escritura (visto 1 vez en 3 corridas, 1 de ~5 400 peticiones);
+  (3) `edge`, `data`, `media` y `monitoring` no tienen respaldo: apagarlas deja el sistema sin servicio.
+
 ## Cómo repetirlo
 
 ```bash
 docker compose up -d --build            # 2 réplicas por servicio, todo healthy
 ./tests/disp/disp1.sh                   # RATE, DURATION, CRASH_AFTER configurables
 ./tests/disp/disp2.sh                   # SERVICE, RATE, DOUBLE_AT configurables
+./tests/disp/vm-failover.sh             # apagar una VM de cada servicio (MODE=backup para respaldo estricto)
 ```
 
 ## Plantilla para la ejecución oficial (cowork)

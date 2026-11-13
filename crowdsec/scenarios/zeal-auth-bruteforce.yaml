@@ -1,0 +1,20 @@
+# SEG-1 · Más de 10 fallos de autenticación de la misma IP (limitados por NGINX o rechazados en el
+# callback), con goteo de 1 cada 30 s → alerta → decisión de bloqueo (profiles.yaml).
+type: leaky
+name: zeal/auth-bruteforce
+description: "Fuerza bruta contra el login con Microsoft"
+filter: "evt.Meta.log_type == 'http_access-log' && evt.Meta.auth_failure == 'true'"
+groupby: evt.Meta.source_ip
+capacity: 10
+leakspeed: 30s
+blackhole: 1m
+labels:
+  service: http
+  type: bruteforce
+  remediation: true
+  confidence: 3
+  spoofable: 0
+  classification:
+    - attack.T1110
+  behavior: "http:bruteforce"
+  label: "ZEAL auth bruteforce"

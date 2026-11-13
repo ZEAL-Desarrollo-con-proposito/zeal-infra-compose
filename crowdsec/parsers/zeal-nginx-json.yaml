@@ -1,0 +1,23 @@
+# SEG-1 · Parser de los logs JSON de NGINX (log_format zeal_json). Marca como "fallo de autenticación":
+#   · una respuesta 429 en /api/auth/ (limit_req ya limitó a esa IP), o
+#   · el callback del login con Microsoft que redirige a /login?error=... (cuenta_no_registrada, fallo,
+#     cancelado): con OIDC ya no existe un 401 de "contraseña incorrecta".
+filter: "evt.Line.Labels.type == 'zeal-nginx' && evt.Line.Raw startsWith '{'"
+onsuccess: next_stage
+name: zeal/nginx-json
+description: "Logs JSON del balanceador de ZEAL"
+statics:
+  - meta: log_type
+    value: http_access-log
+  - meta: service
+    value: http
+  - meta: source_ip
+    expression: JsonExtract(evt.Line.Raw, "remoteAddr")
+  - meta: http_status
+    expression: JsonExtract(evt.Line.Raw, "status")
+  - meta: http_path
+    expression: JsonExtract(evt.Line.Raw, "uri")
+  - meta: auth_failure
+    expression: >-
+      (JsonExtract(evt.Line.Raw, "status") == "429" && JsonExtract(evt.Line.Raw, "uri") startsWith "/api/auth/")
+      || JsonExtract(evt.Line.Raw, "location") contains "/login?error=" ? "true" : "false"

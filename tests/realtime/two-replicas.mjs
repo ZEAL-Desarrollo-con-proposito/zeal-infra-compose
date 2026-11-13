@@ -67,9 +67,14 @@ L.client.publish({ destination: `/app/chats/${encodeURIComponent(cid)}/escribien
 check('"escribiendo" de Laura (B) llega a David (A)', !!(await waitFor(D.inbox, (m) => m.body.type === 'ESCRIBIENDO')));
 
 // 3. Franjas y notificación privada: Laura abre una franja y David la reserva, ambos por NGINX
-const start = bogotaAt(5 + Math.floor(Math.random() * 20), 7 + Math.floor(Math.random() * 10), Math.floor(Math.random() * 12) * 5);
-const slot = await call('POST', '/api/wellbeing/franjas', lauraToken,
-  { startsAt: start.toISOString(), endsAt: new Date(start.getTime() + 50 * 60e3).toISOString() });
+// Hora fuera de las franjas sembradas (07:00-17:00) y día lejano, con reintento si choca con otra franja de Laura.
+let slot;
+for (let attempt = 0; attempt < 8; attempt += 1) {
+  const start = bogotaAt(40 + Math.floor(Math.random() * 300), 19 + Math.floor(Math.random() * 3), Math.floor(Math.random() * 12) * 5);
+  slot = await call('POST', '/api/wellbeing/franjas', lauraToken,
+    { startsAt: start.toISOString(), endsAt: new Date(start.getTime() + 50 * 60e3).toISOString() });
+  if (slot.status === 201) break;
+}
 check('franja creada por NGINX', slot.status === 201, `(${slot.status})`);
 if (slot.status === 201) {
   const booked = await call('POST', '/api/wellbeing/reservas', davidToken, { slotId: slot.body.id });
@@ -106,6 +111,12 @@ await sleep(1500);
 check('sin duplicados en tópicos (A)', count(D.inbox, (m) => m.d === spotsTopic) === 1 && count(D.inbox, (m) => m.body.type === 'PUBLICADO') === 1);
 check('sin duplicados en tópicos (B)', count(L.inbox, (m) => m.d === spotsTopic) === 1);
 check('sin duplicados en colas privadas', count(L.inbox, (m) => m.body.message?.text === text) === 1 && count(A.inbox, (m) => m.body.type === 'PUBLICADO') === 1);
+
+// 5b. REND-1 / OBS: todo mensaje STOMP trae emittedAt (ISO-8601 UTC) reciente, para medir la latencia en el front
+const everything = [...D.inbox, ...L.inbox, ...A.inbox, ...M.inbox].filter((m) => m.body.type !== 'PRESENCIA' || true);
+const stamped = everything.filter((m) => typeof m.body.emittedAt === 'string' && /Z$/.test(m.body.emittedAt)
+  && Math.abs(Date.now() - Date.parse(m.body.emittedAt)) < 120000);
+check(`todos los mensajes STOMP traen emittedAt (${stamped.length}/${everything.length})`, everything.length > 0 && stamped.length === everything.length);
 
 // 6. Desconexión
 D.client.deactivate();

@@ -8,22 +8,47 @@ services:
     restart: unless-stopped
     environment:
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
-      DNS_RESOLVER: ${DNS_RESOLVER:-168.63.129.16}
-      WELLBEING_HOST: ${WELLBEING_HOST:?}
-      MARKETPLACE_HOST: ${MARKETPLACE_HOST:?}
-      REALTIME_HOST: ${REALTIME_HOST:?}
+      # Cada microservicio y el front tienen DOS VMs (1 y 2): IP (o nombre DNS) de cada una, sin puerto.
+      WELLBEING_1_HOST: ${WELLBEING_1_HOST:?}
+      WELLBEING_2_HOST: ${WELLBEING_2_HOST:?}
+      MARKETPLACE_1_HOST: ${MARKETPLACE_1_HOST:?}
+      MARKETPLACE_2_HOST: ${MARKETPLACE_2_HOST:?}
+      REALTIME_1_HOST: ${REALTIME_1_HOST:?}
+      REALTIME_2_HOST: ${REALTIME_2_HOST:?}
+      FRONTEND_1_HOST: ${FRONTEND_1_HOST:?}
+      FRONTEND_2_HOST: ${FRONTEND_2_HOST:?}
       LIVEKIT_HOST: ${LIVEKIT_HOST:?}
-      FRONTEND_HOST: ${FRONTEND_HOST:?}
+      # Vacío: las dos VMs reciben tráfico (activo-activo). "backup": la VM 2 solo entra si la 1 falla.
+      UPSTREAM_2_FLAG: ${UPSTREAM_2_FLAG:-}
+      CROWDSEC_LAPI_URL: http://crowdsec:8080
+      CROWDSEC_BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:?}
     # Solo en la IP privada: el realtime-gateway consulta a wellbeing a través de este balanceador.
     ports: ["${PRIVATE_IP:?}:8080:8080"]
     volumes:
       - ../../../nginx/nginx.multinode.conf.template:/etc/nginx/templates/nginx.conf.template:ro
       - ../../../nginx/conf.d:/etc/nginx/conf.d:ro
+      - ../../../nginx/crowdsec-bouncer.sh:/docker-entrypoint.d/40-crowdsec-bouncer.sh:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
       interval: 10s
       timeout: 3s
       retries: 5
+
+  # SEG-1 (ADR-15): CrowdSec lee los logs de NGINX, detecta fuerza bruta contra el login y decide el
+  # bloqueo; el api-gateway lo aplica a /api/ con crowdsec-bouncer.sh. Sin red de CrowdSec (modo local).
+  crowdsec:
+    image: crowdsecurity/crowdsec:v1.7.0
+    restart: unless-stopped
+    environment:
+      DISABLE_ONLINE_API: "true"
+      BOUNCER_KEY_nginx: ${CROWDSEC_BOUNCER_KEY:?Define CROWDSEC_BOUNCER_KEY (openssl rand -hex 24)}
+    volumes:
+      - ../../../crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ../../../crowdsec/parsers/zeal-nginx-json.yaml:/etc/crowdsec/parsers/s01-parse/zeal-nginx-json.yaml:ro
+      - ../../../crowdsec/scenarios/zeal-auth-bruteforce.yaml:/etc/crowdsec/scenarios/zeal-auth-bruteforce.yaml:ro
+      - ../../../crowdsec/profiles.yaml:/etc/crowdsec/profiles.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - crowdsec_data:/var/lib/crowdsec/data
 
   caddy:
     image: caddy:2.10-alpine
@@ -43,5 +68,6 @@ services:
       api-gateway: { condition: service_healthy }
 
 volumes:
+  crowdsec_data:
   caddy_data:
   caddy_config:

@@ -44,3 +44,10 @@ tests/k6/out/
 
 # Enlace a las dependencias de tests/realtime (lo crea seg4-session-theft.sh)
 tests/security/node_modules
+
+# IP públicas de las VMs (variante de varias cuentas de Azure)
+deploy/azure/peers.env
+
+# Archivos que se crean en cada VM al desplegar (nunca van al repo)
+agent.env
+deploy/nodes/**/targets/*.json

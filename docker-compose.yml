@@ -252,6 +252,29 @@ services:
       rabbitmq: { condition: service_healthy }
       wellbeing: { condition: service_healthy }
 
+  # SEG-1 (ADR-15): CrowdSec lee los logs de NGINX, detecta fuerza bruta contra el login y decide el bloqueo;
+  # el api-gateway lo aplica a /api/ (crowdsec-bouncer.sh). Sin conexión a la red de CrowdSec (modo local).
+  crowdsec:
+    image: crowdsecurity/crowdsec:v1.7.0
+    container_name: zeal-crowdsec
+    restart: unless-stopped
+    environment:
+      DISABLE_ONLINE_API: "true"
+      BOUNCER_KEY_nginx: ${CROWDSEC_BOUNCER_KEY:-zeal-dev-bouncer-key-change-me}
+    volumes:
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ./crowdsec/parsers/zeal-nginx-json.yaml:/etc/crowdsec/parsers/s01-parse/zeal-nginx-json.yaml:ro
+      - ./crowdsec/scenarios/zeal-auth-bruteforce.yaml:/etc/crowdsec/scenarios/zeal-auth-bruteforce.yaml:ro
+      - ./crowdsec/profiles.yaml:/etc/crowdsec/profiles.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - crowdsec_data:/var/lib/crowdsec/data
+      - crowdsec_config:/etc/crowdsec/hub_state
+    healthcheck:
+      test: ["CMD", "cscli", "lapi", "status"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+
   # API Gateway / balanceador: punto de entrada único del frontend (VITE_API_BASE_URL=http://localhost:8080).
   api-gateway:
     image: nginx:1.27-alpine
@@ -262,6 +285,10 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/crowdsec-bouncer.sh:/docker-entrypoint.d/40-crowdsec-bouncer.sh:ro
+    environment:
+      CROWDSEC_LAPI_URL: http://crowdsec:8080
+      CROWDSEC_BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:-zeal-dev-bouncer-key-change-me}
     depends_on:
       wellbeing: { condition: service_healthy }
       marketplace: { condition: service_healthy }
@@ -278,3 +305,5 @@ volumes:
   postgres_marketplace_data:
   redis_data:
   rabbitmq_data:
+  crowdsec_data:
+  crowdsec_config:

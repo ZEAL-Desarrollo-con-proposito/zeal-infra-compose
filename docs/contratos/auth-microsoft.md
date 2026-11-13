@@ -92,6 +92,20 @@ JWT HS256 de 15 min. Claims: `sub` (id), `role`, `fullName`, `email`, `organizat
 **`sid`** (nuevos; identifican el token y la sesión). Las APIs y el CONNECT STOMP lo rechazan con 401 si
 venció o fue revocado.
 
+## 5b. Bloqueo por fuerza bruta (SEG-1) — respuestas que debe manejar el frontend
+
+El bloqueo lo hace el borde (NGINX + CrowdSec), antes de llegar al backend. Aplica a `/api/` (el SPA siempre carga).
+
+| Código | Cuándo | Cabeceras / cuerpo |
+|---|---|---|
+| **429** | La IP superó el límite de intentos de login (`POST /api/auth/microsoft` o `GET /api/auth/microsoft/callback`: ~60 por minuto, ráfaga de 20) | `Retry-After: 60` (segundos) · `{"status":429,"error":"Too Many Requests","message":"Demasiados intentos desde esta red. Intenta de nuevo en un minuto."}` |
+| **403** | CrowdSec bloqueó la IP por fuerza bruta (más de 10 fallos de login) — vale para **cualquier** ruta `/api/` | `Retry-After: 300` (segundos) · `{"status":403,"error":"Forbidden","message":"Acceso bloqueado desde esta red."}` |
+
+- Un intento fallido ya **no** es un 401: es el callback que redirige a `/login?error=cuenta_no_registrada`,
+  `/login?error=fallo` o `/login?error=cancelado`. Eso es lo que cuenta CrowdSec.
+- El bloqueo dura 30 min (el `Retry-After` del 403 es una pista de reintento, no la duración exacta).
+- Las empresas detrás de un mismo NAT comparten IP: un bloqueo afecta a todas sus personas.
+
 ## 6. CORS y cookies
 
 - Producción: SPA y API en el mismo origen (NGINX) → no hay CORS.

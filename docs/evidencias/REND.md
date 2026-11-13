@@ -19,7 +19,7 @@
 | REND-1 | latencia POST de la administradora → mensaje en el cliente | p50 54 ms · **p95 74 ms** · p99 76 ms | p95 ≤ 500 ms | ✅ |
 | REND-2 | respuestas definitivas (ACEPTADA / EN_ESPERA) | **500/500**, 0 errores | 100 % | ✅ |
 | REND-2 | aceptadas / `occupied` en la base | **10 / 10** | exactamente 10 | ✅ |
-| REND-2 | latencia de la postulación | p50 1,01 s · **p95 1,33 s** · p99 1,35 s | p95 ≤ 1 s | ⚠️ local, ver abajo |
+| REND-2 | latencia de la postulación | p50 0,82–0,97 s · **p95 1,2–1,5 s** (con el JIT caliente) · p99 1,3–1,5 s | p95 ≤ 1 s | ⚠️ local, ver abajo |
 | Estrés (reducido) | 100 → 700 req/s en 4 escalones de 20 s | p95 9,6 ms, 0 % errores, sin quiebre | — | punto de quiebre: ejecución oficial |
 
 ### REND-2: qué se cambió y cómo evolucionó
@@ -31,12 +31,22 @@
 | Reclamo atómico en una transacción corta (`SpotClaims`), inserción fuera del bloqueo | 2,45 s → 1,52 s (JIT caliente) | 0 | ~1 ms por postulación en la fila |
 | + una sola sentencia (CTE `FOR UPDATE` + `UPDATE`) y pool de 10 conexiones | **1,33 s** | 0 | más conexiones empeora: la cola de bloqueos de PostgreSQL crece (con 40: > 1 min y `lock_timeout`) |
 
-Límite físico medido en este equipo con `pgbench` sobre una sola fila caliente: ~1 250 commits/s (0,75 ms
-por commit). Las 500 postulaciones se serializan en esa fila por diseño (es lo que garantiza 0
-sobreasignaciones), así que el piso es ~0,4-0,6 s más el resto de la petición, que aquí compite por CPU
-con k6 y las demás réplicas. En el despliegue distribuido (base en su propio nodo, generador aparte)
-se espera bajar del segundo; si no, la siguiente táctica es agrupar los reclamos de una misma
-convocatoria (un `UPDATE` por lote) — anotado como riesgo en el reporte final.
+| + reclamos agrupados por convocatoria (un `UPDATE` por lote, hasta 100; media medida 14 por lote) | **1,2–1,5 s** (tras calentar; 1.ª ejecución 2,4 s) | 0 | el reclamo medio bajó de ~0,43 s a ~0,12–0,18 s; el cuello pasó a guardar la postulación (pool de 10 por réplica) y a la CPU compartida |
+| + pool de 20 conexiones por réplica (descartado) | 1,2–1,5 s | 0 | sin mejora: se vuelve a 10 |
+
+Con los reclamos agrupados `SpotClaims` ya no es el cuello: cada petición espera su lote sin tomar conexión y
+solo usa una para insertar su postulación. Se respeta el orden de llegada (las primeras reciben los cupos, las
+siguientes puestos correlativos de la lista de espera) y la seguridad no cambió: el lote es una sola sentencia con
+`FOR UPDATE` y `LEAST(pedidos, libres)`, y el CHECK `occupied <= capacity` sigue como última red
+(`OverbookingConcurrencyIT`: 500 hilos → exactamente 10 aceptadas, puestos 1..490, `version` = 10).
+
+**Resultado honesto:** en este equipo (12 hilos compartidos por k6, 2 réplicas Java, PostgreSQL y Redis) el p95 sigue
+entre 1,2 y 1,5 s, es decir **no se alcanzó 1 s localmente**, aunque no hay errores ni sobreasignación. Lo que queda
+es CPU de una sola máquina atendiendo ~400 peticiones HTTP/s de 500 conexiones a la vez; no se usó
+`synchronous_commit=off` porque arriesgaría perder operaciones confirmadas. La medición válida es la del despliegue
+distribuido (base de datos en su propio nodo, generador de carga aparte); métricas para diagnosticar allí:
+`zeal_marketplace_spot_claim_seconds`, `zeal_marketplace_spot_claim_batch_size`,
+`zeal_marketplace_application_save_seconds` y `hikaricp_connections_pending`.
 
 ## R2-27 · Por qué la asignación de cupos no puede sobreasignar
 

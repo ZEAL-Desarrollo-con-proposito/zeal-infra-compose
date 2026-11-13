@@ -54,6 +54,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d --bu
 | `http://localhost:8090` | Proveedor OIDC de prueba (en lugar de Microsoft) |
 | `http://localhost:3001` | Grafana (admin / `GRAFANA_ADMIN_PASSWORD`, por defecto `zeal-dev-grafana`) |
 | `http://localhost:9090` · `:9093` | Prometheus · Alertmanager |
+| `docker exec zeal-crowdsec cscli decisions list` | Bloqueos activos de CrowdSec (SEG-1) |
 | `http://localhost:15672` | Consola de RabbitMQ (zeal / `RABBITMQ_PASSWORD`) |
 | `localhost:5432` · `:5433` · `:6379` · `:61613` | PostgreSQL wellbeing · marketplace · Redis · RabbitMQ STOMP (para depurar) |
 
@@ -125,7 +126,7 @@ Contratos detallados para FE: `docs/contratos/` (auth, LiveKit 1:1, telemetría,
 | `docker-compose.host-dev.yml` | Solo infraestructura; servicios en el host |
 | `docker-compose.monitoring.yml` | Monitoreo local + consumidor de métricas de negocio |
 | `docker-compose.prod.yml` + `.env.prod` | Un solo servidor (la VM de la demo) con Caddy TLS |
-| `deploy/nodes/<vm>/docker-compose.yml` | Despliegue en Azure: una VM por microservicio (borde, web, wellbeing, marketplace, realtime, datos, medios, monitoreo) |
+| `deploy/nodes/<vm>/docker-compose.yml` | Despliegue en Azure: 12 VMs; wellbeing, marketplace, realtime y el front en **dos VMs cada uno** (principal y respaldo) detrás del balanceador del borde |
 
 ## 7. Variables de entorno por servicio
 
@@ -170,6 +171,8 @@ ver `REND.md`), `LIVEKIT_*`, `CACHE_TTL`, `DEMO_DATA_ENABLED`.
 | `STOMP_INBOUND_THREADS` / `STOMP_OUTBOUND_THREADS` | 8 / 8 | Hilos de los canales STOMP |
 | `TELEMETRY_REQUESTS_PER_MINUTE` | 30 | Límite de telemetría por persona |
 
+**Borde (NGINX + CrowdSec):** `CROWDSEC_BOUNCER_KEY` (clave con la que NGINX consulta a CrowdSec; en local tiene valor de desarrollo, en prod/multinodo es obligatoria).
+
 **business-metrics (8084):** `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`.
 
 Infraestructura (`.env.example` en local, `.env.prod.example` en un servidor, `deploy/nodes/*/.env.example`
@@ -190,8 +193,10 @@ cd zeal-infra-compose/services/zeal-business-metrics && ./mvnw verify
 (cd tests/realtime && npm test)                   # RT-1/2/3 (usa la cita demo "en 5 min": recién sembrada, tras down -v)
 node tests/security/seg2-login.mjs                # SEG-2: login con el proveedor de prueba
 ./tests/security/seg4-session-theft.sh            # SEG-4: robo de sesión en todas las réplicas
+./tests/security/seg1-bruteforce.sh               # SEG-1: fuerza bruta → 429, CrowdSec y bloqueo en el borde
 ./tools/turn-check/turn-check.sh --from-wellbeing # DT-6: relé TURN forzado
 ./tests/disp/disp1.sh && ./tests/disp/disp2.sh    # DISP-1 / DISP-2
+./tests/disp/vm-failover.sh                       # apagar una VM de cada servicio con carga (MODE=backup: respaldo estricto)
 node tests/concurrency/c1-overbooking.mjs         # reto C-1 (y c2, c3)
 cd tests/k6 && docker run --rm --network host -v "$PWD":/scripts grafana/k6:1.4.2 run /scripts/rend1-broadcast.js
 ```
@@ -203,10 +208,11 @@ Evidencias y resultados: `docs/evidencias/` (DT-4, HU-DT-02, DISP, SEG, MANT, RE
 - **Un servidor** (la VM actual): `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`
   (Caddy pide el certificado; coturn y RabbitMQ ya son parte del despliegue). Completar `.env.prod`
   desde `.env.prod.example` (nuevas: `RABBITMQ_*`, `TURN_*`, `TURN_DOMAIN`, `PUBLIC_IP`).
-- **Azure, una VM por microservicio** (Sprint 2): `docs/cowork/RUNBOOK_DESPLIEGUE_MULTINODO.md` paso a
-  paso (8 VMs: borde, web, wellbeing, marketplace, realtime, datos, medios, monitoreo; dos réplicas por
-  microservicio), con `deploy/nodes/*`, `deploy/azure/provision.sh` y el pipeline
-  `.github/workflows/deploy.yml` de cada servicio (GHCR + SSH, una réplica a la vez, con reversión).
+- **Azure, 4 cuentas, cada microservicio en dos VMs** (Sprint 2): `docs/cowork/RUNBOOK_DESPLIEGUE_MULTINODO.md`
+  paso a paso (12 VMs: borde, web ×2, wellbeing ×2, marketplace ×2, realtime ×2, datos, medios, monitoreo), con
+  `deploy/nodes/*`, `deploy/azure/provision-account.sh` (una cuenta por integrante) y el pipeline
+  `.github/workflows/deploy.yml` de cada servicio (GHCR + SSH, VM 1 y luego VM 2, con reversión). Apagar una
+  VM de servicio: el balanceador manda todo a la otra (ensayo: `tests/disp/vm-failover.sh`).
 - Lo que se hace con el equipo reunido: `docs/cowork/CHECKLIST_COWORK.md`.
 
 ## 10. Problemas frecuentes

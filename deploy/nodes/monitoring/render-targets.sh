@@ -10,11 +10,10 @@ json() {  # json <puerto> <ip...>
 }
 read -r -a ALL_NODES <<< "${ALL_NODE_IPS:?Define ALL_NODE_IPS (todas las VMs, para cAdvisor)}"
 mkdir -p targets
-# Cada microservicio tiene su VM con dos réplicas (puertos 808x y 809x). Si un microservicio tiene más
-# de una VM, poner sus IPs separadas por espacios en *_NODE_IPS.
+# Cada microservicio tiene DOS VMs (principal y respaldo), con una réplica cada una en su puerto base.
 replicas() {  # replicas <puerto> <ip...>
   local port="$1" list=""; shift
-  for ip in "$@"; do list+="\"$ip:$port\",\"$ip:$((port + 10))\","; done
+  for ip in "$@"; do list+="\"$ip:$port\","; done
   printf '[{"targets":[%s]}]\n' "${list%,}"
 }
 read -r -a W <<< "${WELLBEING_NODE_IPS:?}";   replicas 8081 "${W[@]}" > targets/wellbeing.json

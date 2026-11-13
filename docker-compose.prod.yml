@@ -187,6 +187,10 @@ services:
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/crowdsec-bouncer.sh:/docker-entrypoint.d/40-crowdsec-bouncer.sh:ro
+    environment:
+      CROWDSEC_LAPI_URL: http://crowdsec:8080
+      CROWDSEC_BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:?Define CROWDSEC_BOUNCER_KEY (openssl rand -hex 24) en .env.prod}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
       interval: 10s
@@ -198,6 +202,22 @@ services:
       realtime: { condition: service_healthy }
       frontend: { condition: service_healthy }
       livekit: { condition: service_started }
+
+  # SEG-1 (ADR-15): CrowdSec lee los logs de NGINX, detecta fuerza bruta contra el login y decide el
+  # bloqueo; el api-gateway lo aplica a /api/ con crowdsec-bouncer.sh. Sin red de CrowdSec (modo local).
+  crowdsec:
+    image: crowdsecurity/crowdsec:v1.7.0
+    restart: unless-stopped
+    environment:
+      DISABLE_ONLINE_API: "true"
+      BOUNCER_KEY_nginx: ${CROWDSEC_BOUNCER_KEY:?Define CROWDSEC_BOUNCER_KEY (openssl rand -hex 24)}
+    volumes:
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ./crowdsec/parsers/zeal-nginx-json.yaml:/etc/crowdsec/parsers/s01-parse/zeal-nginx-json.yaml:ro
+      - ./crowdsec/scenarios/zeal-auth-bruteforce.yaml:/etc/crowdsec/scenarios/zeal-auth-bruteforce.yaml:ro
+      - ./crowdsec/profiles.yaml:/etc/crowdsec/profiles.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - crowdsec_data:/var/lib/crowdsec/data
 
   caddy:
     image: caddy:2.10-alpine
@@ -256,5 +276,6 @@ volumes:
   marketplace_db:
   redis_data:
   rabbitmq_data:
+  crowdsec_data:
   caddy_data:
   caddy_config:
