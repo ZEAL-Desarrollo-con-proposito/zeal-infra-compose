@@ -6,12 +6,18 @@
 #
 #   deploy-service.sh <wellbeing|marketplace|realtime> <tag>
 #
-# Requiere en la VM: /opt/zeal/docker-compose.yml (deploy/nodes/<servicio>/) y /opt/zeal/.env.
+# Requiere en la VM: docker-compose.yml y .env en deploy/nodes/<servicio>/ (copiados a /opt/zeal), o en
+# deploy/duo/app/ cuando la máquina corre varios servicios (despliegue en dos máquinas).
 set -euo pipefail
 
 service="${1:?Uso: deploy-service.sh <wellbeing|marketplace|realtime> <tag>}"
 tag="${2:?Falta el tag de la imagen (SHA del commit)}"
-dir="${ZEAL_DIR:-/opt/zeal}"
+# Carpeta con el docker-compose.yml y el .env de esta VM: la de dos máquinas (deploy/duo/app) si existe; si no, /opt/zeal.
+dir="${ZEAL_DIR:-}"
+if [ -z "$dir" ]; then
+  dir=/opt/zeal
+  [ -f /opt/zeal/zeal-infra-compose/deploy/duo/app/.env ] && dir=/opt/zeal/zeal-infra-compose/deploy/duo/app
+fi
 timeout="${READINESS_TIMEOUT:-180}"
 
 case "$service" in
@@ -24,10 +30,14 @@ esac
 
 cd "$dir"
 private_ip="$(grep -E '^PRIVATE_IP=' .env | cut -d= -f2)"
-previous="$(grep -E '^IMAGE_TAG=' .env | cut -d= -f2 || true)"
+# Con un servicio por VM la etiqueta es IMAGE_TAG; cuando la VM corre varios servicios (deploy/duo) cada uno
+# tiene la suya: WELLBEING_TAG, MARKETPLACE_TAG, REALTIME_TAG.
+tag_var="IMAGE_TAG"
+grep -qE "^${service^^}_TAG=" .env && tag_var="${service^^}_TAG"
+previous="$(grep -E "^${tag_var}=" .env | cut -d= -f2 || true)"
 
 set_tag() {
-  if grep -qE '^IMAGE_TAG=' .env; then sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$1/" .env; else echo "IMAGE_TAG=$1" >> .env; fi
+  if grep -qE "^${tag_var}=" .env; then sed -i "s/^${tag_var}=.*/${tag_var}=$1/" .env; else echo "${tag_var}=$1" >> .env; fi
 }
 
 ready() {

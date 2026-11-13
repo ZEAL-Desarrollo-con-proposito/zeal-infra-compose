@@ -17,6 +17,7 @@ services:
       REALTIME_2_HOST: ${REALTIME_2_HOST:?}
       FRONTEND_1_HOST: ${FRONTEND_1_HOST:?}
       FRONTEND_2_HOST: ${FRONTEND_2_HOST:?}
+      FRONTEND_PORT: "80"
       LIVEKIT_HOST: ${LIVEKIT_HOST:?}
       # Vacío: las dos VMs reciben tráfico (activo-activo). "backup": la VM 2 solo entra si la 1 falla.
       UPSTREAM_2_FLAG: ${UPSTREAM_2_FLAG:-}

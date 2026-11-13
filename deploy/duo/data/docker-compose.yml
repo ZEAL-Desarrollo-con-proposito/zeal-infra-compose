@@ -1,0 +1,206 @@
+# Capa de DATOS en DOS MÁQUINAS: PostgreSQL (una base por bounded context), Redis y RabbitMQ.
+# El MISMO archivo corre en las dos máquinas; el perfil (COMPOSE_PROFILES en .env) decide el rol:
+#   · primary: la máquina que guarda los datos de verdad (al inicio, la B).
+#   · replica: la otra máquina; PostgreSQL y Redis replican en vivo del primario y RabbitMQ queda en espera.
+# Si el primario se apaga: scripts/promote.sh en la réplica la convierte en primaria y reapunta los servicios.
+# Solo escuchan en la IP privada (el NSG abre cada puerto a la otra máquina).
+name: zeal-data
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+x-pg-env: &repl-env
+  PRIMARY_HOST: ${PRIMARY_HOST:-}
+  REPL_USER: ${REPL_USER:-replicator}
+  REPL_PASSWORD: ${REPL_PASSWORD:?}
+
+services:
+  # ---------- PRIMARIO ----------
+  postgres-wellbeing:
+    <<: *logging
+    profiles: [primary]
+    image: postgres:15-alpine
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:${PG_WELLBEING_PORT:-5432}:5432"]
+    command: ["postgres", "-c", "wal_keep_size=1GB"]
+    environment:
+      POSTGRES_DB: zeal_wellbeing_db
+      POSTGRES_USER: ${WELLBEING_DB_OWNER_USER:-zeal_owner}
+      POSTGRES_PASSWORD: ${WELLBEING_DB_OWNER_PASSWORD:?}
+      APP_DB_USER: ${WELLBEING_DB_APP_USER:-zeal_app}
+      APP_DB_PASSWORD: ${WELLBEING_DB_APP_PASSWORD:?}
+      REPL_USER: ${REPL_USER:-replicator}
+      REPL_PASSWORD: ${REPL_PASSWORD:?}
+    volumes:
+      - wellbeing_db:/var/lib/postgresql/data
+      - ../../../postgres/init:/init/app:ro
+      - ./postgres-init-replication.sh:/init/02-replication.sh:ro
+      - ./postgres-init-all.sh:/docker-entrypoint-initdb.d/10-init-all.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d zeal_wellbeing_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-marketplace:
+    <<: *logging
+    profiles: [primary]
+    image: postgres:15-alpine
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:${PG_MARKETPLACE_PORT:-5433}:5432"]
+    command: ["postgres", "-c", "wal_keep_size=1GB"]
+    environment:
+      POSTGRES_DB: zeal_marketplace_db
+      POSTGRES_USER: ${MARKETPLACE_DB_OWNER_USER:-zeal_owner}
+      POSTGRES_PASSWORD: ${MARKETPLACE_DB_OWNER_PASSWORD:?}
+      APP_DB_USER: ${MARKETPLACE_DB_APP_USER:-zeal_app}
+      APP_DB_PASSWORD: ${MARKETPLACE_DB_APP_PASSWORD:?}
+      REPL_USER: ${REPL_USER:-replicator}
+      REPL_PASSWORD: ${REPL_PASSWORD:?}
+    volumes:
+      - marketplace_db:/var/lib/postgresql/data
+      - ../../../postgres/init:/init/app:ro
+      - ./postgres-init-replication.sh:/init/02-replication.sh:ro
+      - ./postgres-init-all.sh:/docker-entrypoint-initdb.d/10-init-all.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d zeal_marketplace_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    <<: *logging
+    profiles: [primary]
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:${REDIS_PORT:-6379}:6379"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------- RÉPLICA ----------
+  postgres-wellbeing-replica:
+    <<: *logging
+    profiles: [replica]
+    image: postgres:15-alpine
+    restart: unless-stopped
+    user: postgres
+    ports: ["${PRIVATE_IP:?}:${PG_WELLBEING_PORT:-5432}:5432"]
+    entrypoint: ["/replica-entrypoint.sh"]
+    environment:
+      <<: *repl-env
+      PRIMARY_PORT: ${PRIMARY_PG_WELLBEING_PORT:-5432}
+    volumes:
+      - wellbeing_db:/var/lib/postgresql/data
+      - ./postgres-replica-entrypoint.sh:/replica-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  postgres-marketplace-replica:
+    <<: *logging
+    profiles: [replica]
+    image: postgres:15-alpine
+    restart: unless-stopped
+    user: postgres
+    ports: ["${PRIVATE_IP:?}:${PG_MARKETPLACE_PORT:-5433}:5432"]
+    entrypoint: ["/replica-entrypoint.sh"]
+    environment:
+      <<: *repl-env
+      PRIMARY_PORT: ${PRIMARY_PG_MARKETPLACE_PORT:-5433}
+    volumes:
+      - marketplace_db:/var/lib/postgresql/data
+      - ./postgres-replica-entrypoint.sh:/replica-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  redis-replica:
+    <<: *logging
+    profiles: [replica]
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:${REDIS_PORT:-6379}:6379"]
+    # Con PRIMARY_HOST vacío (después de promote.sh) arranca como primario y no vuelve a replicar del viejo.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+      PRIMARY_HOST: ${PRIMARY_HOST:-}
+      PRIMARY_REDIS_PORT: ${PRIMARY_REDIS_PORT:-6379}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\" --masterauth \"$$REDIS_PASSWORD\" $${PRIMARY_HOST:+--replicaof $$PRIMARY_HOST $$PRIMARY_REDIS_PORT}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------- Ambos roles: RabbitMQ (relay STOMP del gateway; sin estado que replicar: en la réplica queda
+  # encendido y, al promover, los gateways se reapuntan a él) ----------
+  rabbitmq:
+    <<: *logging
+    profiles: [primary, replica]
+    image: rabbitmq:4.2.9-management-alpine
+    hostname: zeal-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "${PRIVATE_IP:?}:${RABBITMQ_STOMP_PORT:-61613}:61613"
+      - "${PRIVATE_IP:?}:15692:15692"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-zeal}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?}
+    volumes:
+      - ../../../rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ../../../rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-zeal.conf:ro
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_port_listener 61613"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  # Exportadores para Prometheus (solo en el rol primario y solo hacia la IP privada).
+  postgres-exporter-wellbeing:
+    profiles: [primary]
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:9187:9187"]
+    environment:
+      DATA_SOURCE_NAME: postgresql://${WELLBEING_DB_OWNER_USER:-zeal_owner}:${WELLBEING_DB_OWNER_PASSWORD}@postgres-wellbeing:5432/zeal_wellbeing_db?sslmode=disable
+  postgres-exporter-marketplace:
+    profiles: [primary]
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:9188:9187"]
+    environment:
+      DATA_SOURCE_NAME: postgresql://${MARKETPLACE_DB_OWNER_USER:-zeal_owner}:${MARKETPLACE_DB_OWNER_PASSWORD}@postgres-marketplace:5432/zeal_marketplace_db?sslmode=disable
+  redis-exporter:
+    profiles: [primary]
+    image: oliver006/redis_exporter:v1.74.0
+    restart: unless-stopped
+    ports: ["${PRIVATE_IP:?}:9121:9121"]
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+volumes:
+  wellbeing_db:
+  marketplace_db:
+  redis_data:
+  rabbitmq_data:

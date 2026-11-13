@@ -24,7 +24,7 @@ ip_of_replica() { ip "${VM[${1}${2}]}"; }
 
 docker rm -f zeal-edge-failover > /dev/null 2>&1 || true
 docker run -d --name zeal-edge-failover --network "$net" -p "$PORT:8080" \
-  -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx -e UPSTREAM_2_FLAG="$flag" \
+  -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx -e UPSTREAM_2_FLAG="$flag" -e FRONTEND_PORT=80 \
   -e WELLBEING_1_HOST="$(ip_of_replica wellbeing 1)"     -e WELLBEING_2_HOST="$(ip_of_replica wellbeing 2)" \
   -e MARKETPLACE_1_HOST="$(ip_of_replica marketplace 1)" -e MARKETPLACE_2_HOST="$(ip_of_replica marketplace 2)" \
   -e REALTIME_1_HOST="$(ip_of_replica realtime 1)"       -e REALTIME_2_HOST="$(ip_of_replica realtime 2)" \

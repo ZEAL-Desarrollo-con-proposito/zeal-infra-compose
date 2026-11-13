@@ -7,7 +7,8 @@
 #   · UPSTREAM_2_FLAG vacío   → las dos reciben tráfico (activo-activo: reparte carga y tolera la caída).
 #   · UPSTREAM_2_FLAG=backup  → la VM 2 es un respaldo estricto: solo recibe tráfico si la 1 falla
 #                               (excepto los WebSockets, que usan hash y NGINX no admite backup con hash).
-# *_1_HOST y *_2_HOST son la IP (o el nombre DNS) de cada VM, sin puerto.
+# *_1_HOST y *_2_HOST son la IP (o el nombre DNS) de cada VM, sin puerto; FRONTEND_PORT es el puerto del front (80
+# con una VM por servicio; 3080 cuando comparte máquina con Caddy, que ocupa el 80).
 worker_processes auto;
 
 events {
@@ -57,8 +58,8 @@ http {
     }
     upstream frontend {
         zone frontend 64k;
-        server ${FRONTEND_1_HOST}:80 max_fails=3 fail_timeout=10s;
-        server ${FRONTEND_2_HOST}:80 max_fails=3 fail_timeout=10s ${UPSTREAM_2_FLAG};
+        server ${FRONTEND_1_HOST}:${FRONTEND_PORT} max_fails=3 fail_timeout=10s;
+        server ${FRONTEND_2_HOST}:${FRONTEND_PORT} max_fails=3 fail_timeout=10s ${UPSTREAM_2_FLAG};
     }
 
     server {
