@@ -253,7 +253,7 @@ cd /opt/zeal/zeal-infra-compose/deploy/nodes/monitoring
 printf 'PRIVATE_IP=%s\nLOKI_URL=http://<IP pública de monitoring>:3100/loki/api/v1/push\n' <IP privada de esta VM> > agent.env
 docker compose -f monitoring-agent.yml --env-file agent.env up -d
 ```
-**Verificar:** `https://zeal.<dominio>/grafana` pide login y el tablero "ZEAL · Estado de la plataforma" muestra las
+**Verificar:** `https://zeal.<dominio>/grafana` pide login y los tableros "ZEAL · Negocio" y "ZEAL · Técnico" muestran las
 dos réplicas de cada servicio arriba.
 
 ## 11. Prueba de apagar una máquina (la que piden en la evaluación)

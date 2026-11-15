@@ -144,3 +144,19 @@ docker run --rm --network host -e START=50 -e STEP=50 -e STEPS=10 -v "$PWD":/scr
 | REND-2 aceptadas / sin decisión / `occupied` | | 10 / 0 / 10 |
 | Estrés: último escalón sano (req/s, p95) | | — |
 | Estrés: escalón de quiebre y causa (CPU, pool, base, gateway…) | | — |
+
+
+## REND-2 en el despliegue REAL de Azure (2026-11-15)
+
+`tests/k6/rend2-applications.js` desde un equipo externo (Colombia) contra el despliegue (A: 2 vCPU, B: 4 vCPU).
+
+| Medida | Corrida 1 | Corrida 3 | Objetivo |
+|---|---|---|---|
+| Respuestas definitivas | 500/500, 0 errores | 500/500, 0 errores | 100 % |
+| Aceptadas / `occupied` | 10 / 10 | 10 / 10 | exactamente 10 |
+| p95 | **5,36 s** | **3,03 s** (avg 1,75 s) | ≤ 1 s ✗ |
+
+Correcto pero **no cumple la latencia**: el equipo de carga está a ≈ 100 ms de Azure y abre 500 conexiones TLS a la vez,
+y la máquina A tiene solo 2 vCPU. Para aislar esa parte hay que repetirlo desde una VM dentro de Azure y con más
+vCPU (la cuota de la cuenta de estudiante es de 6 vCPU por región). Una corrida intermedia (corrida 2) no envió
+peticiones por un fallo de arranque del script y se descartó.

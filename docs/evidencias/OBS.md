@@ -109,7 +109,7 @@ en el log. Pruebas: `TelemetryApiIT`. Por NGINX: `POST /api/telemetria` → 202 
 | Alertmanager | `monitoring/alertmanager/alertmanager.yml` (`amtool check-config` OK); local: receptor de prueba `alert-sink` |
 | Loki + Alloy | `monitoring/loki/loki.yml`, `monitoring/alloy/config.alloy` (logs de Docker; `level` como etiqueta, `correlation_id` y `replica` como metadatos) |
 | cAdvisor, exportadores de PostgreSQL y Redis | `docker-compose.monitoring.yml` |
-| Grafana | datasources y tablero **"ZEAL · Estado de la plataforma"** provisionados (`monitoring/grafana/`): réplicas arriba por componente, alertas activas, p95 y errores por servicio, peticiones/s, latencia commit → STOMP, conexiones WebSocket, negocio, errores del frontend, revocaciones SEG-4 y logs de error |
+| Grafana | datasources y tableros **"ZEAL · Negocio"** y **"ZEAL · Técnico"** provisionados (`monitoring/grafana/`): réplicas arriba por componente, alertas activas, p95 y errores por servicio, peticiones/s, latencia commit → STOMP, conexiones WebSocket, negocio, errores del frontend, revocaciones SEG-4 y logs de error |
 
 Multinodo: `deploy/nodes/monitoring/` (Prometheus con `file_sd` generado por `render-targets.sh` desde
 las IPs privadas, Alertmanager con el canal real, Loki, Grafana en `/grafana` tras el borde con
