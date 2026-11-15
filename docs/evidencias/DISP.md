@@ -165,3 +165,23 @@ docker compose up -d --build            # 2 réplicas por servicio, todo healthy
 | Operaciones confirmadas perdidas | | — | 0 |
 | Tiempo hasta que la réplica nueva atiende | — | | < 120 s |
 | p95 | | | ≤ 500 ms |
+
+
+## DISP-1 en el despliegue REAL de Azure (2026-11-15)
+
+Dos máquinas (`vm-zeal-a`, 2 vCPU · `vm-zeal-b`, 4 vCPU, región `eastus2`), carga desde un equipo externo a Azure
+contra `https://zeal-610558.trafficmanager.net` con `tests/disp/azure-disp1.sh` (30 req/s durante 150 s; a los 30 s
+se apaga la máquina A con `az vm deallocate`).
+
+| Medida | Resultado | Objetivo |
+|---|---|---|
+| Peticiones | 4501 | — |
+| Errores visibles | **0 (0,000 %)** | 0 |
+| p95 / máximo | 129 ms / 2385 ms | — |
+| Postulaciones confirmadas / guardadas | **892 / 892** | iguales (0 perdidas) |
+| Reincorporación de A (`az vm start` → atiende HTTPS) | **78 s** | < 2 min |
+
+**Alcance honesto:** esta prueba apaga la máquina **A** (réplica de datos). Apagar la **B** (primaria de datos) no da
+0 errores: la API falla hasta ejecutar `deploy/duo/scripts/promote.sh` en A (≈ 1–2 min); ver
+`docs/cowork/RUNBOOK_DESPLIEGUE_DUO.md` §2 y §9.2. DISP-2 ("agregar una instancia") queda medido localmente
+(sección anterior); en Azure, lo más cercano medido es la reincorporación de A (78 s).

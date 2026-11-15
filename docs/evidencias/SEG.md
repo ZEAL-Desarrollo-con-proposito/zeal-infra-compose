@@ -146,3 +146,22 @@ node tests/security/seg2-login.mjs
 Registrar la app en Microsoft Entra ID (URI de redirección `https://<dominio>/api/auth/microsoft/callback`,
 secreto, tenant), cargar `OIDC_*` en los nodos de servicios, repetir `seg2-login` (con una cuenta real de
 prueba) y `seg4-session-theft` sobre el despliegue distribuido, y conectar el canal real de la alerta.
+
+
+## SEG-1 en el despliegue REAL de Azure (2026-11-15)
+
+`tests/security/seg1-azure.sh`: la VM B (IP pública `20.14.193.237`) dispara 110 intentos en ≈ 55 s contra el
+borde de A (`POST /api/auth/microsoft`); este equipo, con otra IP, entra a la vez.
+
+| Medida | Resultado | Objetivo |
+|---|---|---|
+| Respuestas al atacante | 200 × 62 · **429 × 12** · **403 × 36** | límite de tasa y bloqueo |
+| Primer 429 / primer 403 | intento 48 / intento 75 | — |
+| `Retry-After` en el 429 | 60 s | presente |
+| CrowdSec en A | decisión `zeal/auth-bruteforce` sobre la IP atacante; 3 alertas registradas | ataque registrado |
+| Atacante bloqueado en `/api/` | 403 (el front `/` sigue en 200) | bloqueo solo en `/api/` |
+| Otra IP durante el bloqueo | login 200 y front 200 | entra con normalidad |
+
+Tras la prueba se levantó el bloqueo (`cscli decisions delete --ip <IP>`). SEG-2 y SEG-4 usan el proveedor de
+login de pruebas y tokens forjados con el secreto del entorno de desarrollo; **no son ejecutables tal cual contra el
+login real de Microsoft** y quedan como evidencia local (secciones anteriores).
