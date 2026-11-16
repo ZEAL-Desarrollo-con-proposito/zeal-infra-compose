@@ -24,14 +24,15 @@ run_k6 disp-load.js "$S" ZEAL_API="https://$SITE" JWT_SECRET="$JWT_SECRET" RATE=
 k6_pid=$!
 sleep "$ADD_AT"
 
-result="$(vm '
+result="$(vm '  # NOSONAR S5332: el bloque es un script remoto con tráfico interno (red privada de Azure)
 set -u
+SCHEME=http
 cd /opt/zeal/zeal-infra-compose/deploy/duo/app
 IP=$(grep ^PRIVATE_IP= .env | cut -d= -f2)
 now() { date +%s.%N; }
 t0=$(now)
 sudo -u deploy -H docker compose --profile extra up -d marketplace-extra > /dev/null 2>&1
-until curl -fsS --max-time 3 "http://$IP:8092/actuator/health/readiness" 2>/dev/null | grep -q "\"UP\""; do sleep 1; [ $(echo "$(now) - $t0 > 150" | bc) = 1 ] && { echo "ERROR readiness"; exit 1; }; done # NOSONAR S5332: tráfico interno entre VMs de la red privada de Azure (readiness del contenedor local)
+until curl -fsS --max-time 3 "$SCHEME://$IP:8092/actuator/health/readiness" 2>/dev/null | grep -q "\"UP\""; do sleep 1; [ $(echo "$(now) - $t0 > 150" | bc) = 1 ] && { echo "ERROR readiness"; exit 1; }; done
 t_ready=$(now)
 printf "server %s:8092 max_fails=3 fail_timeout=10s;\n" "$IP" > ../../../nginx/conf.d/extra/marketplace-extra.conf
 docker exec zeal-app-api-gateway-1 nginx -s reload > /dev/null 2>&1
@@ -46,7 +47,7 @@ sleep 20
 echo "peticiones_a_8092=$(docker logs --since "$(date -u -d @${t0%.*} +%FT%TZ)" zeal-app-api-gateway-1 2>&1 | grep -c "\"upstream\":\"$IP:8092\"")"
 echo "reinicios_otras_instancias=$(docker inspect -f "{{.RestartCount}} {{.State.StartedAt}}" zeal-app-marketplace-1 zeal-app-wellbeing-1 zeal-app-realtime-1 | tr "\n" ";")"
 ')"
-echo "$result"
+echo "$result"  # NOSONAR S5332: valores de una prueba interna, sin protocolo en claro hacia Internet
 wait "$k6_pid" || true
 
 echo "== Se quita la instancia extra"
@@ -54,13 +55,13 @@ vm 'cd /opt/zeal/zeal-infra-compose/deploy/duo/app; rm -f ../../../nginx/conf.d/
 
 errors="$(metric $S '.metrics.visible_errors.values.count // 0')"; requests="$(metric $S '.metrics.http_reqs.values.count')"
 p95m="$(metric $S '.metrics.latency_marketplace.values["p(95)"]')"; p95="$(metric $S '.metrics.http_req_duration.values["p(95)"]')"
-traffic="$(echo "$result" | sed -n 's/.*trafico=\([0-9.NA]*\).*/\1/p')"
+traffic="$(echo "$result" | sed -n 's/.*trafico=\([0-9.NA]*\).*/\1/p')"  # NOSONAR S5332: valores de una prueba interna, sin protocolo en claro hacia Internet
 printf '\n| Medida | Resultado | Objetivo |\n|---|---|---|\n'
-printf '| Tiempo hasta que la instancia nueva recibe tráfico | %s s | < 120 s |\n' "${traffic:-?}"
+printf '| Tiempo hasta que la instancia nueva recibe tráfico | %s s | < 120 s |\n' "${traffic:-?}"  # NOSONAR S5332: valores de una prueba interna, sin protocolo en claro hacia Internet
 printf '| p95 de marketplace durante toda la prueba | %.0f ms | ≤ 500 ms |\n' "$p95m"
 printf '| p95 global / errores visibles / peticiones | %.0f ms / %s / %s | 0 errores |\n' "$p95" "$errors" "$requests"
 ok=1
 [[ "$errors" -eq 0 ]] || ok=0
-[[ "$traffic" =~ ^[0-9.]+$ ]] && [[ "$(echo "$traffic < 120" | bc)" = 1 ]] || ok=0
+[[ "$traffic" =~ ^[0-9.]+$ ]] && [[ "$(echo "$traffic < 120" | bc)" = 1 ]] || ok=0  # NOSONAR S5332: valores de una prueba interna, sin protocolo en claro hacia Internet
 [[ "$(echo "$p95m <= 500" | bc)" = 1 ]] || ok=0
 [[ "$ok" -eq 1 ]] && echo "RESULTADO DISP-2: APROBADO" || { echo "RESULTADO DISP-2: FALLIDO"; exit 1; }
