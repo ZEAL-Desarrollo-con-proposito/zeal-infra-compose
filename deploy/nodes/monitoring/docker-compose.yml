@@ -31,6 +31,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./secrets:/etc/alertmanager/secrets:ro   # discord_webhook (secreto, fuera de git)
 
   loki:
     image: grafana/loki:3.5.3

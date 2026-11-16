@@ -160,3 +160,40 @@ Correcto pero **no cumple la latencia**: el equipo de carga está a ≈ 100 ms d
 y la máquina A tiene solo 2 vCPU. Para aislar esa parte hay que repetirlo desde una VM dentro de Azure y con más
 vCPU (la cuota de la cuenta de estudiante es de 6 vCPU por región). Una corrida intermedia (corrida 2) no envió
 peticiones por un fallo de arranque del script y se descartó.
+
+
+## REND-1 en el despliegue REAL de Azure (2026-11-15)
+
+500 conexiones WebSocket/STOMP reales y 3 publicaciones, con k6 ejecutado **desde la VM A** contra el balanceador de B por la
+red privada (`http://10.20.0.4:8080`), para no medir la red de Internet ni el TLS del equipo de carga. Los WebSockets
+se reparten por sesión entre los gateways de B y de A.
+
+| Medida | Resultado | Objetivo |
+|---|---|---|
+| Conexiones establecidas | **500 / 500** (101) | 100 % |
+| Latencia publicación → cliente | p50 94 ms · **p95 132 ms** · p99 137 ms | p95 ≤ 500 ms |
+| Entregados / perdidos | 1500 / **0** | 0 perdidos |
+
+Un primer intento desde un equipo doméstico (Internet) conectó solo 244 de 500 WebSockets: las otras 256 nunca llegaron
+a las VMs (ninguna de las dos máquinas las registró), es decir, el límite estaba en la red del equipo de carga y no en
+el servicio; ese intento se descartó como medición.
+
+## REND-2 en el despliegue REAL de Azure: medida desde el cliente y desde el servidor (2026-11-15)
+
+k6 desde la VM A contra el balanceador de B (red privada). El p95 del servidor sale de Prometheus
+(`http_server_requests_seconds` de `POST /api/proyectos/{id}/postulaciones`, el mismo dato que ve Grafana en el tablero técnico).
+
+| Corrida | p95 cliente (k6) | p95 servidor | p50 servidor | Respuestas / aceptadas |
+|---|---|---|---|---|
+| 1 | 2,36 s | (sin muestras: scrape pendiente) | — | 500/500 · 10 |
+| 2 | 1,06 s | 0,62 s | 0,27 s | 500/500 · 10 |
+| 3 | 1,62 s | 1,05 s | 0,34 s | 500/500 · 10 |
+
+Siempre exactamente 10 aceptadas, `occupied = 10` y 0 errores. Dentro del servicio, el p95 del reclamo de cupo es
+0,24–0,25 s y el del guardado 0,27–0,29 s: el reclamo agrupado (`SpotClaims`) ya no es el cuello. **El p95 sigue entre
+≈ 0,6 y ≈ 1,0 s en el servidor y entre 1,1 y 2,4 s medido por el cliente**, es decir, la meta de ≤ 1 s es borderline del lado del
+servidor y no se cumple del lado del cliente. Análisis: A tiene 2 vCPU y B 4 vCPU (cuota de la cuenta de estudiante), el
+generador de carga comparte A y la CPU media de las máquinas durante la corrida fue del 40–62 %; hay 500 peticiones
+simultáneas sobre 3 JVM. La medición por `increase()` con pocas muestras de scrape es ruidosa (±0,2 s); para una cifra
+estable harían falta una VM de carga aparte y más vCPU. Desde un equipo doméstico por Internet el p95 fue de 3,0–5,4 s
+(red y 500 handshakes TLS), sección anterior.

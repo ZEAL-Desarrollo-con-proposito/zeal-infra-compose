@@ -38,7 +38,7 @@ echo "   atacante bloqueado en /api/: $(run "$VM_B" "curl -s -o /dev/null -w '%{
 run "$VM_A" "docker exec zeal-app-crowdsec-1 cscli decisions delete --ip $B_PUB" > /dev/null
 echo "   bloqueo de $B_PUB levantado"
 ok=1
-[ -n "$first429" ] || ok=0
-[ -n "$first403" ] || ok=0
-[ "$(login)" = 200 ] || ok=0
-[ "$ok" -eq 1 ] && echo "RESULTADO SEG-1: APROBADO" || { echo "RESULTADO SEG-1: FALLIDO"; exit 1; }
+[[ -n "$first429" ]] || ok=0
+[[ -n "$first403" ]] || ok=0
+[[ "$(login)" = 200 ]] || ok=0
+[[ "$ok" -eq 1 ]] && echo "RESULTADO SEG-1: APROBADO" || { echo "RESULTADO SEG-1: FALLIDO"; exit 1; }

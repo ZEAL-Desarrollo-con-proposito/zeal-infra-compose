@@ -27,6 +27,7 @@ http {
         least_conn;
         server ${WELLBEING_1_HOST}:8081 max_fails=3 fail_timeout=10s;
         server ${WELLBEING_2_HOST}:8081 max_fails=3 fail_timeout=10s ${UPSTREAM_2_FLAG};
+        include /etc/nginx/conf.d/extra/wellbeing-*.conf;   # DISP-2: instancias agregadas en caliente
         keepalive 32;
     }
     upstream marketplace {
@@ -34,6 +35,7 @@ http {
         least_conn;
         server ${MARKETPLACE_1_HOST}:8082 max_fails=3 fail_timeout=10s;
         server ${MARKETPLACE_2_HOST}:8082 max_fails=3 fail_timeout=10s ${UPSTREAM_2_FLAG};
+        include /etc/nginx/conf.d/extra/marketplace-*.conf;   # DISP-2: instancias agregadas en caliente
         keepalive 32;
     }
     upstream realtime {
@@ -41,6 +43,7 @@ http {
         least_conn;
         server ${REALTIME_1_HOST}:8083 max_fails=3 fail_timeout=10s;
         server ${REALTIME_2_HOST}:8083 max_fails=3 fail_timeout=10s ${UPSTREAM_2_FLAG};
+        include /etc/nginx/conf.d/extra/realtime-*.conf;   # DISP-2: instancias agregadas en caliente
         keepalive 16;
     }
     upstream realtime_ws {

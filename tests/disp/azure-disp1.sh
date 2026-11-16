@@ -47,7 +47,7 @@ printf '| Ventana | %s → %s (A apagada a las %s) | — |\n' "$t_start" "$t_end
 echo; echo "== Se enciende $VM_A de nuevo y se mide cuánto tarda en atender tráfico"
 t0=$(date +%s); az vm start -g "$RG" -n "$VM_A" --no-wait
 t_vm=""; t_web=""
-while [ $(( $(date +%s) - t0 )) -lt 600 ]; do
+while [[ $(( $(date +%s) - t0 )) -lt 600 ]]; do
   if curl -fsS --max-time 4 --resolve "$SITE:443:$A_PUB" "https://$SITE/gateway/health" > /dev/null 2>&1; then
     t_web=$(( $(date +%s) - t0 )); break
   fi
@@ -55,7 +55,7 @@ while [ $(( $(date +%s) - t0 )) -lt 600 ]; do
 done
 echo "   $VM_A atiende HTTPS ${t_web:-(no en 10 min)} s después de encenderla"
 ok=1
-[ "$errors" -eq 0 ] || ok=0
-[ "$confirmed" = "$stored" ] || ok=0
-[ "$requests" -gt 100 ] || ok=0
-[ "$ok" -eq 1 ] && echo "RESULTADO DISP-1: APROBADO" || { echo "RESULTADO DISP-1: FALLIDO"; exit 1; }
+[[ "$errors" -eq 0 ]] || ok=0
+[[ "$confirmed" = "$stored" ]] || ok=0
+[[ "$requests" -gt 100 ]] || ok=0
+[[ "$ok" -eq 1 ]] && echo "RESULTADO DISP-1: APROBADO" || { echo "RESULTADO DISP-1: FALLIDO"; exit 1; }

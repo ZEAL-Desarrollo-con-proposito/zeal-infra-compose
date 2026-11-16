@@ -26,6 +26,12 @@ loki.source.docker "containers" {
 }
 
 loki.process "zeal" {
+  // Loki rechaza (400) entradas más viejas que la mitad de max_chunk_age (≈ 1 h). Al arrancar, Alloy lee el
+  // historial del contenedor: se descarta lo que ya no se puede ingerir en lugar de perder todo el lote.
+  stage.drop {
+    older_than          = "30m"
+    drop_counter_reason = "historial_viejo"
+  }
   stage.json {
     expressions = { level = "level", correlation_id = "correlationId", replica = "replica" }
   }
