@@ -185,3 +185,26 @@ se apaga la máquina A con `az vm deallocate`).
 0 errores: la API falla hasta ejecutar `deploy/duo/scripts/promote.sh` en A (≈ 1–2 min); ver
 `docs/cowork/RUNBOOK_DESPLIEGUE_DUO.md` §2 y §9.2. DISP-2 ("agregar una instancia") queda medido localmente
 (sección anterior); en Azure, lo más cercano medido es la reincorporación de A (78 s).
+
+
+## DISP-2 en el despliegue REAL de Azure (2026-11-15)
+
+`tests/disp/azure-disp2.sh`: con 40 req/s constantes desde un equipo externo, la VM B agrega una instancia de
+marketplace (`docker compose --profile extra up -d marketplace-extra`, puerto 8092), escribe
+`nginx/conf.d/extra/marketplace-extra.conf` y recarga NGINX (`nginx -s reload`). **No se cambia código ni se reinicia
+ninguna otra instancia** (los contadores de reinicio y las horas de arranque de marketplace, wellbeing y realtime no cambian).
+
+| Medida | Resultado | Objetivo |
+|---|---|---|
+| La instancia nueva queda lista (readiness) | 21 s | — |
+| Primera petición atendida por la instancia nueva | **22 s** (128 peticiones atendidas en la ventana) | < 2 min |
+| p95 de marketplace durante toda la prueba | **415 ms** | ≤ 500 ms |
+| Errores visibles / peticiones | **0 / 8402** | 0 |
+
+## Límite conocido: apagar B (primaria de datos)
+
+La base de datos primaria (PostgreSQL ×2, Redis, RabbitMQ) vive en la máquina **B**; A tiene la réplica. Si B se apaga,
+la API falla hasta ejecutar `deploy/duo/scripts/promote.sh` en A (1–2 min). **No se automatiza la promoción**: con un
+corte de red entre las dos máquinas quedarían dos bases primarias (split-brain). Por eso la demostración de DISP-1
+apaga la máquina **A**, que da 0 errores (sección anterior). La recuperación de B está en
+`docs/cowork/RUNBOOK_DESPLIEGUE_DUO.md` §9.2.

@@ -24,7 +24,7 @@ cuerpo de **16 KB como máximo** con `Content-Length` (lo que envían `fetch` y 
 |---|---|
 | `events` | 1 a **20** eventos por envío (agrupar y enviar cada ~30 s o al ocultar la pestaña) |
 | `type` | `error` · `uso` · `latencia` |
-| `name` | `^[a-z0-9_]{1,40}$`. Nombres reconocidos (fuera de esta lista se cuentan como `otro`): `error_js`, `error_api`, `chunk_load`, `ws_desconectado`, `video_fallo`, `login`, `reservar_cita`, `cancelar_cita`, `chat_enviado`, `postular`, `inscribir_taller`, `entrar_sala`, `entrar_taller`, `tomar_cupo`, `carga_inicial`, `notificacion_recibida`, `mensaje_recibido`, `api_respuesta` |
+| `name` | `^[a-z0-9_]{1,40}$`. Nombres reconocidos (fuera de esta lista se cuentan como `otro`): `error_js`, `error_api`, `chunk_load`, `ws_desconectado`, `video_fallo`, `login`, `reservar_cita`, `cancelar_cita`, `chat_enviado`, `postular`, `inscribir_taller`, `entrar_sala`, `entrar_taller`, `tomar_cupo`, `carga_inicial`, `notificacion_recibida`, `mensaje_recibido`, `api_respuesta`, `vista` (uso), `interaccion` (latencia) |
 | `route` | Opcional. Ruta del SPA **sin identificadores**: `^(/[a-z-]{1,30}){0,4}/?$` (p. ej. `/empleado/sala`, no `/empleado/sala/reserva-123`) |
 | `valueMs` | Solo para `latencia`: 0 a 120000 |
 

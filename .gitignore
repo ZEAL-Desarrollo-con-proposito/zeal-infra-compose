@@ -52,3 +52,6 @@ deploy/azure/peers-duo.env
 # Archivos que se crean en cada VM al desplegar (nunca van al repo)
 agent.env
 deploy/nodes/**/targets/*.json
+
+# Webhook de alertas (secreto)
+deploy/nodes/monitoring/secrets/

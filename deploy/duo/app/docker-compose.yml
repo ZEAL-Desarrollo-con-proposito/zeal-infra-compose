@@ -29,6 +29,19 @@ x-common-env: &common-env
   APP_TIME_ZONE: America/Bogota
   CORS_ALLOWED_ORIGINS: ${PUBLIC_URL:?}
 
+x-marketplace-env: &marketplace-env
+    <<: *common-env
+    DB_URL: jdbc:postgresql://${DATA_HOST}:5433/zeal_marketplace_db
+    DB_USERNAME: ${MARKETPLACE_DB_APP_USER:-zeal_app}
+    DB_PASSWORD: ${MARKETPLACE_DB_APP_PASSWORD:?}
+    SPRING_FLYWAY_USER: ${MARKETPLACE_DB_OWNER_USER:-zeal_owner}
+    SPRING_FLYWAY_PASSWORD: ${MARKETPLACE_DB_OWNER_PASSWORD:?}
+    DB_POOL_SIZE: ${DB_POOL_SIZE:-10}   # ver docs/evidencias/REND.md
+    DEMO_DATA_ENABLED: ${DEMO_DATA_ENABLED:-false}
+    LIVEKIT_PUBLIC_URL: /livekit
+    LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?}
+    LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?}
+
 services:
   wellbeing:
     <<: *java
@@ -60,18 +73,22 @@ services:
     image: ${REGISTRY:-ghcr.io}/${GHCR_OWNER:?}/zeal-marketplace-service:${MARKETPLACE_TAG:-latest}
     ports: ["${PRIVATE_IP:?}:8082:8082"]
     environment:
-      <<: *common-env
+      <<: [*common-env, *marketplace-env]
       NODE_NAME: marketplace-${MACHINE}
-      DB_URL: jdbc:postgresql://${DATA_HOST}:5433/zeal_marketplace_db
-      DB_USERNAME: ${MARKETPLACE_DB_APP_USER:-zeal_app}
-      DB_PASSWORD: ${MARKETPLACE_DB_APP_PASSWORD:?}
-      SPRING_FLYWAY_USER: ${MARKETPLACE_DB_OWNER_USER:-zeal_owner}
-      SPRING_FLYWAY_PASSWORD: ${MARKETPLACE_DB_OWNER_PASSWORD:?}
-      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}   # ver docs/evidencias/REND.md
-      DEMO_DATA_ENABLED: ${DEMO_DATA_ENABLED:-false}
-      LIVEKIT_PUBLIC_URL: /livekit
-      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?}
+
+  # DISP-2 · Instancia ADICIONAL de marketplace en esta máquina, sin tocar código ni reiniciar las demás:
+  #   docker compose --profile extra up -d marketplace-extra
+  #   echo 'server ${PRIVATE_IP}:8092 max_fails=3 fail_timeout=10s;' > ../../../nginx/conf.d/extra/marketplace-extra.conf
+  #   docker compose exec api-gateway nginx -s reload      # recarga sin cortar conexiones
+  # Quitarla: borrar el archivo, recargar y `docker compose --profile extra stop marketplace-extra`.
+  marketplace-extra:
+    <<: *java
+    profiles: [extra]
+    image: ${REGISTRY:-ghcr.io}/${GHCR_OWNER:?}/zeal-marketplace-service:${MARKETPLACE_TAG:-latest}
+    ports: ["${PRIVATE_IP:?}:8092:8082"]
+    environment:
+      <<: [*common-env, *marketplace-env]
+      NODE_NAME: marketplace-${MACHINE}-extra
 
   realtime:
     <<: *java

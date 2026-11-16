@@ -5,7 +5,7 @@ name: zeal-agent
 
 services:
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    image: gcr.io/cadvisor/cadvisor:v0.55.1   # ≥ 0.55: habla con Docker 29 (API mínima 1.44); con 0.52 faltan los nombres de contenedor
     restart: unless-stopped
     privileged: true
     ports: ["${PRIVATE_IP:?}:8089:8080"]
@@ -23,4 +23,8 @@ services:
       LOKI_URL: ${LOKI_URL:?Define LOKI_URL (http://<IP del nodo de monitoreo>:3100/loki/api/v1/push)}
     volumes:
       - ./alloy.multinode.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data   # posiciones de lectura: un reinicio no reenvía los logs viejos
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  alloy_data:
