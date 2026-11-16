@@ -132,3 +132,22 @@ qué componente tiene réplicas caídas, su p95 y su tasa de errores, y el panel
 Desplegar `deploy/nodes/monitoring` y el agente en cada nodo, generar los objetivos con las IPs reales,
 conectar el canal real de Alertmanager, proteger Grafana (contraseña fuerte; opcional: restricción por IP
 de oficina en el Caddy del borde) y repetir las dos pruebas de alerta sobre el despliegue distribuido.
+
+
+## OBS-1 en el despliegue REAL con canal real (Discord) — 2026-11-16
+
+Alertmanager (VM B) entrega al canal `#alertas-zeal` de Discord (`discord_configs`; la URL del webhook vive en
+`deploy/nodes/monitoring/secrets/discord_webhook`, fuera de git). Los tiempos se midieron con un vigilante en la VM B que
+consulta cada segundo a Prometheus y al contador `alertmanager_notifications_total{integration="discord"}` (sube cuando la
+entrega termina bien; `…_failed_total` quedó en 0 en todas las pruebas).
+
+| Alerta | Cómo se provocó | Falla → alerta en Prometheus | Alerta → mensaje en Discord | **Falla → Discord** | Meta |
+|---|---|---|---|---|---|
+| `ReplicaCaida` | `az vm deallocate` de la VM A con carga | 67 s (`for: 1m` + evaluación de 15 s) | 10 s (`group_wait`) | **77 s** | ≤ 3 min ✅ |
+| `TasaDeErroresAlta` | se detuvo la base de marketplace en B con 6 req/s de carga (5xx > 1 % a los 19 s) | 141 s (`for: 2m`) | 10 s | **151 s (2 min 31 s)** | ≤ 3 min ✅ |
+| `ReutilizacionDeSesion` (SEG-4) | alerta sintética por la ruta SEG-4 (`group_wait: 0s`) | — | **0,18 s** | evaluación de 15 s + `for: 0m` ⇒ < 1 min | < 1 min ✅ (la prueba real de reutilización de token es local: 14 s en Alertmanager, 26 s hasta el receptor) |
+
+- Al volver A y la base, Alertmanager envió también los avisos de **resuelto** (`send_resolved: true`).
+- Tras la prueba se restauró la base (`docker start`): readiness UP en las dos réplicas, replicación en `streaming` y 0 % de errores.
+- SEG-4 con un robo de refresh token real no se puede repetir contra el login de Microsoft sin una sesión interactiva;
+  la evidencia de la prueba completa sigue siendo la local (sección anterior) y aquí se midió la entrega al canal real.
