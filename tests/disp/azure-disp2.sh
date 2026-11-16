@@ -31,7 +31,7 @@ IP=$(grep ^PRIVATE_IP= .env | cut -d= -f2)
 now() { date +%s.%N; }
 t0=$(now)
 sudo -u deploy -H docker compose --profile extra up -d marketplace-extra > /dev/null 2>&1
-until curl -fsS --max-time 3 "http://$IP:8092/actuator/health/readiness" 2>/dev/null | grep -q "\"UP\""; do sleep 1; [ $(echo "$(now) - $t0 > 150" | bc) = 1 ] && { echo "ERROR readiness"; exit 1; }; done
+until curl -fsS --max-time 3 "http://$IP:8092/actuator/health/readiness" 2>/dev/null | grep -q "\"UP\""; do sleep 1; [ $(echo "$(now) - $t0 > 150" | bc) = 1 ] && { echo "ERROR readiness"; exit 1; }; done # NOSONAR S5332: tráfico interno entre VMs de la red privada de Azure (readiness del contenedor local)
 t_ready=$(now)
 printf "server %s:8092 max_fails=3 fail_timeout=10s;\n" "$IP" > ../../../nginx/conf.d/extra/marketplace-extra.conf
 docker exec zeal-app-api-gateway-1 nginx -s reload > /dev/null 2>&1
@@ -60,7 +60,7 @@ printf '| Tiempo hasta que la instancia nueva recibe tráfico | %s s | < 120 s |
 printf '| p95 de marketplace durante toda la prueba | %.0f ms | ≤ 500 ms |\n' "$p95m"
 printf '| p95 global / errores visibles / peticiones | %.0f ms / %s / %s | 0 errores |\n' "$p95" "$errors" "$requests"
 ok=1
-[ "$errors" -eq 0 ] || ok=0
-[[ "$traffic" =~ ^[0-9.]+$ ]] && [ "$(echo "$traffic < 120" | bc)" = 1 ] || ok=0
-[ "$(echo "$p95m <= 500" | bc)" = 1 ] || ok=0
-[ "$ok" -eq 1 ] && echo "RESULTADO DISP-2: APROBADO" || { echo "RESULTADO DISP-2: FALLIDO"; exit 1; }
+[[ "$errors" -eq 0 ]] || ok=0
+[[ "$traffic" =~ ^[0-9.]+$ ]] && [[ "$(echo "$traffic < 120" | bc)" = 1 ]] || ok=0
+[[ "$(echo "$p95m <= 500" | bc)" = 1 ]] || ok=0
+[[ "$ok" -eq 1 ]] && echo "RESULTADO DISP-2: APROBADO" || { echo "RESULTADO DISP-2: FALLIDO"; exit 1; }
