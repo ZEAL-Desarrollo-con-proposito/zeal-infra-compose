@@ -141,12 +141,18 @@ node tests/security/seg2-login.mjs
 ./tests/security/seg4-session-theft.sh
 ```
 
-## Pendiente de cowork
+## Despliegue distribuido (cowork)
 
-Registrar la app en Microsoft Entra ID (URI de redirección `https://<dominio>/api/auth/microsoft/callback`,
-secreto, tenant), cargar `OIDC_*` en los nodos de servicios, repetir `seg2-login` (con una cuenta real de
-prueba) y `seg4-session-theft` sobre el despliegue distribuido, y conectar el canal real de la alerta.
+**Resuelto:**
+- App registrada en Microsoft Entra ID (tenant de la Escuela, URI de redirección `https://<dominio>/api/auth/microsoft/callback`,
+  claim `email`, secreto de cliente) y variables `OIDC_*` cargadas en las dos máquinas.
+- Canal real de la alerta de SEG-4 conectado (Discord); la entrega se midió en 0,18 s (ver `OBS.md`).
+- SEG-1 ejecutado contra el despliegue real (sección siguiente).
 
+**Pendiente (lo que de verdad falta):**
+- SEG-2 a mano en producción, con capturas: cuenta registrada (entra), cuenta no registrada (`/login?error=cuenta_no_registrada`) y cancelar.
+- SEG-2 y SEG-4 automatizados (`seg2-login`, `seg4-session-theft`) usan el proveedor de login de pruebas y no se pueden
+  repetir contra el login real de Microsoft: quedan como evidencia local.
 
 ## SEG-1 en el despliegue REAL de Azure (2026-11-15)
 

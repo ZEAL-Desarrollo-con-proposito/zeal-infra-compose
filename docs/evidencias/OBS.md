@@ -127,12 +127,16 @@ Para identificar el componente en ≤ 5 min: la alerta trae `job`; el tablero mu
 qué componente tiene réplicas caídas, su p95 y su tasa de errores, y el panel de logs filtra por
 `service`/`level` (con el `correlationId` se sigue una petición concreta).
 
-## Pendiente de cowork
+## Despliegue distribuido (cowork) — resuelto
 
-Desplegar `deploy/nodes/monitoring` y el agente en cada nodo, generar los objetivos con las IPs reales,
-conectar el canal real de Alertmanager, proteger Grafana (contraseña fuerte; opcional: restricción por IP
-de oficina en el Caddy del borde) y repetir las dos pruebas de alerta sobre el despliegue distribuido.
-
+| Pendiente original | Estado |
+|---|---|
+| Desplegar `deploy/nodes/monitoring` y el agente en cada nodo | ✅ Prometheus, Loki, Grafana, Alertmanager y métricas de negocio en la VM B; agente (cAdvisor + Alloy) en A y B |
+| Generar los objetivos con las IPs reales | ✅ `render-targets.sh` con las IPs privadas de A y B (8 grupos de objetivos arriba) |
+| Conectar el canal real de Alertmanager | ✅ Discord (`#alertas-zeal`); ver la sección siguiente |
+| Repetir las dos pruebas de alerta sobre el despliegue distribuido | ✅ `ReplicaCaida` 77 s y `TasaDeErroresAlta` 2 min 31 s |
+| Proteger Grafana con contraseña fuerte | ✅ Detrás de Caddy en `/grafana`, con inicio de sesión (contraseña de 64 caracteres) |
+| Restricción por IP de oficina (opcional) | ⏳ No aplicada; Grafana queda protegida solo por su inicio de sesión |
 
 ## OBS-1 en el despliegue REAL con canal real (Discord) — 2026-11-16
 

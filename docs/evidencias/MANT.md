@@ -53,14 +53,22 @@ Análisis local: `javac -Xlint:all` (0 advertencias) y SpotBugs 4.10.5.0 (`effor
 | Filtro de dueño después de cargar (IDOR, también "Security Hotspot") | sala, activar sala, tomar cupo, sala del taller | Filtro en la consulta (ver `SEG.md`) |
 | Clases sin uso tras el refactor | `LoginRequest`, `InvalidCredentialsException`, consultas sin filtro | Eliminadas |
 
-**Pendiente de validar en SonarCloud:** 62 avisos `EI_EXPOSE_REP/EI_EXPOSE_REP2` de SpotBugs. Son en su
-gran mayoría beans de Spring inyectados guardados en campos y records con listas inmutables
-(`List.copyOf`): falsos positivos conocidos en Spring. Si SonarCloud marca alguno como *code smell* real,
-se corrige en la primera ejecución del Quality Gate.
+**Estado en SonarCloud (rama `main`, 2026-11-16):** los avisos `EI_EXPOSE_REP/EI_EXPOSE_REP2` de SpotBugs eran falsos
+positivos conocidos en Spring (beans inyectados y records con listas inmutables) y SonarCloud ya no los reporta como
+pendientes: hoy hay **0–2 code smells por servicio** (wellbeing 2, marketplace 1, realtime 0, frontend 0).
 
-## R2-20 · Quality Gate obligatorio en main (cowork)
+## R2-20 · Quality Gate obligatorio en main (cowork) — aplicado
 
-Pasos en `docs/cowork/CHECKLIST_COWORK.md` (sección MANT): Quality Gate "ZEAL" (calificaciones A en
-código nuevo, cobertura ≥ 80 %, 0 hotspots sin revisar), asignarlo a los tres proyectos y regla de
-protección de `main` que exige los checks `verify` (CI) y `SonarCloud Code Analysis`. No se modificó
-la configuración de GitHub.
+`main` está protegido en los 5 repositorios (los 3 servicios, el frontend e infraestructura): exige los checks
+`verify` (CI) y `SonarCloud Code Analysis`, también para administradores. Resultado en SonarCloud (2026-11-16):
+
+| Repo | Quality Gate | Cobertura | Seguridad | Fiabilidad | Mantenibilidad |
+|---|---|---|---|---|---|
+| wellbeing | OK | 84,2 % | A | A | A |
+| marketplace | OK | 85,1 % | A | A | A |
+| realtime-gateway | OK | 84,8 % | A | A | A |
+| frontend | OK | 98,4 % | A | A | A |
+
+Infraestructura no tiene paso de Sonar en el CI: usa el **análisis automático** de SonarCloud (no apagarlo: es lo único
+que publica el check que exige la protección de `main`). Sus scripts de pruebas y herramientas se tratan como código de
+prueba con `.sonarcloud.properties` (`sonar.tests=tests,tools`).
