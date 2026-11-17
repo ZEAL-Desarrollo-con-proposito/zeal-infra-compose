@@ -19,6 +19,8 @@ if [ -z "$dir" ]; then
   [ -f /opt/zeal/zeal-infra-compose/deploy/duo/app/.env ] && dir=/opt/zeal/zeal-infra-compose/deploy/duo/app
 fi
 timeout="${READINESS_TIMEOUT:-180}"
+# El readiness se consulta DESDE la misma VM, en su IP privada de la red de Azure: no sale a Internet (S5332 justificado).
+scheme=http
 
 case "$service" in
   wellbeing) port=8081 ;;
@@ -43,7 +45,7 @@ set_tag() {
 ready() {
   local start; start=$(date +%s)
   while [ $(( $(date +%s) - start )) -lt "$timeout" ]; do
-    if curl -fsS --max-time 3 "http://${private_ip}:${port}/actuator/health/readiness" 2>/dev/null | grep -q '"UP"'; then
+    if curl -fsS --max-time 3 "${scheme}://${private_ip}:${port}/actuator/health/readiness" 2>/dev/null | grep -q '"UP"'; then  # NOSONAR S5332: consulta local, red privada de Azure
       echo "$(uname -n) · $service listo en $(( $(date +%s) - start )) s"; return 0
     fi
     sleep 3

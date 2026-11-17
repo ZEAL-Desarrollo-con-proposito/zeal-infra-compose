@@ -5,6 +5,18 @@
 > La **ejecución oficial** es sobre el despliegue distribuido, con k6 en una máquina distinta a los
 > servicios (R2-28, ver `docs/cowork/CHECKLIST_COWORK.md`).
 
+## Resumen para la sustentación
+
+| Escenario | Naturaleza | Resultado en el despliegue real de Azure | Estado |
+|---|---|---|---|
+| **REND-1** | **Escenario oficial** | 500/500 conectados, **p95 132 ms** (meta ≤ 500 ms), 0 eventos perdidos | ✅ **Cumple** |
+| REND-2 | Adicional (no oficial) | 10 aceptadas exactas, 0 errores, 0 sobreasignaciones; p95 del servidor ≈ 0,6–1,0 s y del cliente 1,1–2,4 s (meta ≤ 1 s) | ⚠️ **Cumple parcialmente** |
+
+REND-2 cumple lo funcional (exactamente 10 aceptadas, 500/500 respuestas, 0 sobreasignaciones) y la latencia queda en el
+borde de la meta. La causa es de capacidad: la cuenta de estudiante limita a 6 vCPU por región, así que la VM A tiene 2 vCPU
+(B tiene 4) y el generador de carga comparte A; con 500 peticiones simultáneas sobre 3 JVM la CPU media de las máquinas
+fue del 40–62 %. El análisis completo está en la sección "REND-2 en el despliegue REAL de Azure" más abajo.
+
 ## Escenarios
 
 - **REND-1:** 500 empleados conectados repartidos entre réplicas; una publicación llega a todos con p95 ≤ 500 ms, 0 eventos perdidos y 0 errores.
