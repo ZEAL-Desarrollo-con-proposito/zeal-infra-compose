@@ -45,7 +45,7 @@ vigencia y `nonce`), busca la cuenta por correo y responde **302**:
 |---|---|---|
 | Cuenta registrada | `<frontend>/<returnTo>` | `zeal_refresh=…; Path=/api/auth; HttpOnly; Secure; SameSite=Strict` (+ `Max-Age` si `remember`) |
 | Cuenta no registrada en ZEAL | `<frontend>/login?error=cuenta_no_registrada` | — |
-| La persona canceló en Microsoft | `<frontend>/login?error=cancelado` | — |
+| La persona canceló en Microsoft (llega `error=access_denied` o `error=consent_required`, AADSTS65004 «User declined to consent», según la pantalla donde cancele) | `<frontend>/login?error=cancelado` | — |
 | Cualquier otra falla (state/nonce/firma/emisor/audiencia inválidos, flujo vencido, proveedor caído) | `<frontend>/login?error=fallo` | — |
 
 Siempre se borra `zeal_oidc`. El mensaje no indica nada más (no revela qué cuentas existen más allá
